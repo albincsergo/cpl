@@ -26,5 +26,5 @@ while (i < n) {
 ## Functionality
 Loops: for, while <br>
 Variables: ints, longs, long longs, doubles and the unsigned version of everything, strings and chars <br>
-Data structures: structs, vectors, arrays, maps
+Data structures: structs, vectors, arrays, maps <br>
 Basic input and output
