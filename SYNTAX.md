@@ -22,9 +22,21 @@ while (i < n) {
     ++i.
 }
 ```
+Others:
+```go
+bo b = false;
+ull n. // unsigned long long
+in @ n.
+for (it i. i < n. ++i) {
+    n /= i.
+    if (i = 3) b = true.
+}
+if (b) ou @@ "HEck YEah".
+else ou @@ "Heck NaW".
+```
 
 ## Functionality
 Loops: for, while <br>
-Variables: ints, longs, long longs, doubles and the unsigned version of everything, strings and chars <br>
+Variables: ints, longs, long longs, doubles and the unsigned version of everything, strings and chars, booleans <br>
 Data structures: structs, vectors, arrays, maps <br>
-Basic input and output
+Basic input and output, basic arithmetic operations (+, -, *, /, %), if-else statements
