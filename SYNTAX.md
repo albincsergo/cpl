@@ -33,10 +33,13 @@ for (it i. i < n. ++i) {
 }
 if (b) ou @@ "HEck YEah".
 else ou @@ "Heck NaW".
+// declaring floating point numbers
+du x = 2,3.
 ```
 
 ## Functionality
 Loops: for, while <br>
 Variables: ints, longs, long longs, doubles and the unsigned version of everything, strings and chars, booleans <br>
 Data structures: structs, vectors, arrays, maps <br>
-Basic input and output, basic arithmetic operations (+, -, *, /, %), if-else statements
+Basic input and output, basic arithmetic operations (+, -, *, /, %), if-else statements <br>
+External function calls
