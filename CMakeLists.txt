@@ -1,7 +1,12 @@
-cmake_minimum_required(VERSION 3.20)
-
+cmake_minimum_required(VERSION 3.10)
 project(cpl)
 
-set(CMAKE_CXX_STANDARD 20)
+find_package(LLVM REQUIRED CONFIG)
 
-add_executable(cpl src/main.cpp)
+include_directories(${LLVM_INCLUDE_DIRS})
+include_directories(${CMAKE_SOURCE_DIR}/src)
+add_definitions(${LLVM_DEFINITIONS})
+
+add_executable(cpl src/CPL.cpp)
+
+target_link_libraries(cpl LLVM)
