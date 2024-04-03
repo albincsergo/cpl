@@ -3,7 +3,7 @@ from Token import TokenType, Token
 from typing import Any
 from enum import Enum, auto
 
-from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement, IdentifierLiteral, ShallStatement, AssignmentExpression
+from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement, IdentifierLiteral, ShallStatement
 
 # precedence types
 class PrecedenceType(Enum):
