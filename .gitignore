@@ -1,3 +1,6 @@
 build/
 .vscode/
 *.ll
+.idea/
+python/__pycache__
+cmake-build-debug/
