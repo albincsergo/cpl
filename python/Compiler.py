@@ -1,6 +1,8 @@
 from llvmlite import ir
 
-from AST import Node, NodeType, Program, Expression, Statement, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral
+from AST import Node, NodeType, Program, Expression, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral, ShallStatement, IdentifierLiteral
+
+from Environment import Environment
 
 class Compiler:
     def __init__(self) -> None:
@@ -12,6 +14,8 @@ class Compiler:
         self.module: ir.Module = ir.Module("main")
 
         self.builder: ir.IRBuilder = ir.IRBuilder()
+
+        self.environment: Environment = Environment()
     
     def compile(self, node: Node) -> None:
         match node.type():
@@ -21,7 +25,8 @@ class Compiler:
             # statements
             case NodeType.ExpressionStatement:
                 self.visitExpressionStatement(node)
-            
+            case NodeType.ShallStatement:
+                self.visitShallStatement(node)
             # expressions
             case NodeType.InfixExpression:
                 self.visitInfixExpression(node)
@@ -86,10 +91,27 @@ class Compiler:
                     value = self.builder.frem(leftValue, rightValue)
 
         return value, Type
+    
+    def visitShallStatement(self, node: ShallStatement) -> None:
+        name: str = node.name.value
+        value: Expression = node.value
+        valueType: str = node.valueType
+
+        value, Type = self.resolveValue(node=value)
+
+        if self.environment.lookup(name) is None:
+            pointer = self.builder.alloca(Type)
+
+            self.builder.store(value, pointer)
+
+            self.environment.define(name, value, Type)
+        else: 
+            pointer, _ = self.environment.lookup(name)
+            self.builder.store(value, pointer)
     # endregion
         
     # region helpers
-    def resolveValue(self, node: Expression, valueType: str = None) -> tuple[ir.Value, ir.Type]:
+    def resolveValue(self, node: Expression) -> tuple[ir.Value, ir.Type]:
         match node.type():
             case NodeType.IntegerLiteral:
                 node: IntegerLiteral = node
@@ -99,7 +121,12 @@ class Compiler:
                 node: DoubleLiteral = node
                 value, Type = node.value, self.typeMap["double"]
                 return ir.Constant(Type, value), Type
-            
+            case NodeType.IdentifierLiteral:
+                node: IdentifierLiteral = node
+                pointer, Type = self.enviromnent.lookup(node.value)
+                return self.builder.load(pointer), Type
+
+            # expression values
             case NodeType.InfixExpression:
                 return self.visitInfixExpression(node)
     # endregion
