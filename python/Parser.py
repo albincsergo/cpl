@@ -132,9 +132,11 @@ class Parser:
         if not self.expectPeek(TokenType.EQUALS):
             return None
         
+        self.nextToken()
+
         statement.value = self.parseExpression(PrecedenceType.P_LOWEST)
 
-        while not self.currentTokenIs(TokenType.DOT) and self.currentTokenIs(TokenType.EOF):
+        while not self.currentTokenIs(TokenType.DOT) and not self.currentTokenIs(TokenType.EOF):
             self.nextToken()
 
         return statement
