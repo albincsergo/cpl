@@ -3,7 +3,8 @@ from Token import TokenType, Token
 from typing import Any
 from enum import Enum, auto
 
-from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement, IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStatement, BlockStatement
+from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement 
+from AST import IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStatement, BlockStatement, AssignStatement
 
 # precedence types
 class PrecedenceType(Enum):
@@ -107,6 +108,9 @@ class Parser:
     
     # region statement helpers
     def parseStatement(self) -> Statement:
+        if self.currentToken.type == TokenType.IDENTIFIER and self.peekTokenIs(TokenType.EQUALS):
+            return self.parseAssignmentStatement()
+        
         match self.currentToken.type:
             case TokenType.SHALL:
                 return self.parseShallStatement()
@@ -213,6 +217,20 @@ class Parser:
             self.nextToken()
 
         return blockStatement
+    
+    def parseAssignmentStatement(self) -> AssignStatement:
+        statement: AssignStatement = AssignStatement()
+
+        statement.ident = IdentifierLiteral(value=self.currentToken.literal)
+
+        self.nextToken() # skips IDENT
+        self.nextToken() # skips '='
+
+        statement.rightValue = self.parseExpression(PrecedenceType.P_LOWEST)
+        
+        self.nextToken()
+
+        return statement
     # endregion
 
     # region expression helpers

@@ -1,6 +1,7 @@
 from llvmlite import ir
 
-from AST import Node, NodeType, Program, Expression, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral, ShallStatement, IdentifierLiteral, BlockStatement, FunctionStatement, ReturnStatement
+from AST import Node, NodeType, Program, Expression, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral
+from AST import ShallStatement, IdentifierLiteral, BlockStatement, FunctionStatement, ReturnStatement, AssignStatement
 
 from Environment import Environment
 
@@ -16,6 +17,9 @@ class Compiler:
         self.builder: ir.IRBuilder = ir.IRBuilder()
 
         self.environment: Environment = Environment()
+
+        # temporary error implementation
+        self.errors: list[str] = []
     
     def compile(self, node: Node) -> None:
         match node.type():
@@ -33,6 +37,8 @@ class Compiler:
                 self.visitBlockStatement(node)
             case NodeType.ReturnStatement:
                 self.visitReturnStatement(node)
+            case NodeType.AssignStatement:
+                self.visitAssignStatement(node)
 
             # expressions
             case NodeType.InfixExpression:
@@ -141,6 +147,18 @@ class Compiler:
         self.environment.define(name, func, returnType)
 
         self.builder = previousBuilder
+
+    def visitAssignStatement(self, node: AssignStatement) -> None: 
+        name: str = node.ident.value
+        value: Expression = node.rightValue
+
+        value, Type = self.resolveValue(value)
+
+        if self.environment.lookup(name) is None:
+            self.errors.append(f"~~~ COMPILE ERROR: Identifier {name} wasn't declared previously.")
+        else:
+            pointer, _ = self.environment.lookup(name)
+            self.builder.store(value, pointer)
     # endregion
         
     # region helpers
