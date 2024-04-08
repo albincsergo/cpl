@@ -4,3 +4,4 @@ build/
 .idea/
 python/__pycache__
 cmake-build-debug/
+src/
