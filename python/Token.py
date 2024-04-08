@@ -23,11 +23,16 @@ class TokenType(Enum):
     DOT = "DOT"
     LPAREN = "LPAREN"
     RPAREN = "RPAREN"
+    LBRACE = "LBRACE"
+    RBRACE = "RBRACE"
     COLON = "COLON"
     EQUALS = "EQUALS"
+    ARROW = "ARROW"
 
     # keywords
     SHALL = "SHALL"
+    FUNC = "FUNC"
+    RET = "RET"
 
     # typing
     TYPE = "TYPE"
@@ -46,12 +51,17 @@ class Token:
         return str(self)
     
 KEYWORRDS: dict[str, TokenType] = {
-    "shall": TokenType.SHALL
+    "shall": TokenType.SHALL,
+    "func": TokenType.FUNC,
+    "ret": TokenType.RET
 }
 
 ALTERNATIVE_KEYWORDS: dict[str, TokenType] = {
     "fr": TokenType.DOT,
-    "eq": TokenType.EQUALS
+    "eq": TokenType.EQUALS,
+    "_": TokenType.SHALL,
+    "f": TokenType.FUNC,
+    "r": TokenType.RET
 }
 
 TYPE_KEYWORDS: list[str] = ["int", "double"]

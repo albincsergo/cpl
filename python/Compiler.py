@@ -1,6 +1,6 @@
 from llvmlite import ir
 
-from AST import Node, NodeType, Program, Expression, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral, ShallStatement, IdentifierLiteral
+from AST import Node, NodeType, Program, Expression, ExpressionStatement, InfixExpression, IntegerLiteral, DoubleLiteral, ShallStatement, IdentifierLiteral, BlockStatement, FunctionStatement, ReturnStatement
 
 from Environment import Environment
 
@@ -27,28 +27,21 @@ class Compiler:
                 self.visitExpressionStatement(node)
             case NodeType.ShallStatement:
                 self.visitShallStatement(node)
+            case NodeType.FunctionStatement:
+                self.visitFunctionStatement(node)
+            case NodeType.BlockStatement:
+                self.visitBlockStatement(node)
+            case NodeType.ReturnStatement:
+                self.visitReturnStatement(node)
+
             # expressions
             case NodeType.InfixExpression:
                 self.visitInfixExpression(node)
 
     # region visit methods
     def visitProgram(self, node: Program) -> None:
-        functionName: str = "mn"
-        paramTypes: list[ir.Type] = []
-        returnType: ir.Type = ir.VoidType()
-
-        functionType = ir.FunctionType(returnType, paramTypes)
-        function = ir.Function(self.module, functionType, name=functionName)
-
-        block = function.append_basic_block(f"{functionName}_entry")
-        
-        self.builder = ir.IRBuilder(block)
-
         for statement in node.statements:
             self.compile(statement)
-
-        returnValue: ir.Constant = ir.Constant(self.typeMap["int"], 69)
-        self.builder.ret(returnValue)
 
     def visitExpressionStatement(self, node: ExpressionStatement) -> None:
         self.compile(node.expression)
@@ -104,10 +97,50 @@ class Compiler:
 
             self.builder.store(value, pointer)
 
-            self.environment.define(name, value, Type)
+            self.environment.define(name, pointer, Type)
         else: 
             pointer, _ = self.environment.lookup(name)
             self.builder.store(value, pointer)
+
+    def visitBlockStatement(self, node: BlockStatement) -> None:
+        for statement in node.statements:
+            self.compile(statement)
+
+    def visitReturnStatement(self, node: ReturnStatement) -> None:
+        value: Expression = node.returnValue
+        value, Type = self.resolveValue(value)
+
+        self.builder.ret(value)
+
+    def visitFunctionStatement(self, node: FunctionStatement) -> None:
+        name: str = node.name.value
+        body: BlockStatement = node.body
+        params: list[IdentifierLiteral] = node.parameters
+
+        paramNames: list[str] = [par.value for par in params]
+        paramTypes: list[ir.Type] = []
+        returnType: ir.Type = self.typeMap[node.returnType]
+
+        funcType: ir.FunctionType = ir.FunctionType(returnType, paramTypes)
+        func: ir.Function = ir.Function(self.module, funcType, name=name)
+
+        block: ir.Block = func.append_basic_block(f'{name}_entry')
+
+        previousBuilder = self.builder
+
+        self.builder = ir.IRBuilder(block)
+
+        previousEnvironment = self.environment
+
+        self.environment = Environment(parent=self.environment)
+        self.environment.define(name, func, returnType)
+
+        self.compile(body)
+
+        self.environment = previousEnvironment
+        self.environment.define(name, func, returnType)
+
+        self.builder = previousBuilder
     # endregion
         
     # region helpers
@@ -123,7 +156,7 @@ class Compiler:
                 return ir.Constant(Type, value), Type
             case NodeType.IdentifierLiteral:
                 node: IdentifierLiteral = node
-                pointer, Type = self.enviromnent.lookup(node.value)
+                pointer, Type = self.environment.lookup(node.value)
                 return self.builder.load(pointer), Type
 
             # expression values

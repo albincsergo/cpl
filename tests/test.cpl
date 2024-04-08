@@ -1,2 +1,5 @@
-shall g: int eq 137 fr
-shall gg: double = 3,14159265.
+f mn() -> int {
+    _ s: int = 4 * 2.
+
+    r s.
+}

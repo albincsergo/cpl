@@ -3,7 +3,7 @@ from Token import TokenType, Token
 from typing import Any
 from enum import Enum, auto
 
-from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement, IdentifierLiteral, ShallStatement
+from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement, IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStatement, BlockStatement
 
 # precedence types
 class PrecedenceType(Enum):
@@ -37,6 +37,7 @@ class Parser:
         self.peekToken: Token = None
 
         self.prefixParseFns: dict[TokenType, callable] = {
+            TokenType.IDENTIFIER: self.parseIdentifier,
             TokenType.INT: self.parseIntegerLiteral,
             TokenType.DOUBLE: self.parseDoubleLiteral,
             TokenType.LPAREN: self.parseGroupedExpression
@@ -109,6 +110,10 @@ class Parser:
         match self.currentToken.type:
             case TokenType.SHALL:
                 return self.parseShallStatement()
+            case TokenType.FUNC:
+                return self.parseFunctionStatement()
+            case TokenType.RET:
+                return self.parseReturnStatement()
             case _:
                 return self.parseExpressionStatement()
             
@@ -149,6 +154,65 @@ class Parser:
         
         statement: ExpressionStatement = ExpressionStatement(expression=expression)
         return statement
+    
+    def parseFunctionStatement(self) -> FunctionStatement:
+        statement: FunctionStatement = FunctionStatement()
+        
+        # f name() -> int { r 2. }
+
+        if not self.expectPeek(TokenType.IDENTIFIER):
+            return None
+        
+        statement.name = IdentifierLiteral(value=self.currentToken.literal)
+
+        if not self.expectPeek(TokenType.LPAREN):
+            return None
+        
+        statement.parameters = []
+
+        if not self.expectPeek(TokenType.RPAREN):
+            return None
+        
+        if not self.expectPeek(TokenType.ARROW):
+            return None
+
+        if not self.expectPeek(TokenType.TYPE):
+            return None
+
+        statement.returnType = self.currentToken.literal
+
+        if not self.expectPeek(TokenType.LBRACE):
+            return None
+        
+        statement.body = self.parseBlockStatement()
+
+        return statement
+
+    def parseReturnStatement(self) -> ReturnStatement:
+        statement: Statement = ReturnStatement()
+
+        self.nextToken()
+
+        statement.returnValue = self.parseExpression(PrecedenceType.P_LOWEST)
+
+        if not self.expectPeek(TokenType.DOT):
+            return None
+        
+        return statement
+
+    def parseBlockStatement(self) -> BlockStatement:
+        blockStatement: BlockStatement = BlockStatement()
+
+        self.nextToken()
+        
+        while not self.currentTokenIs(TokenType.RBRACE) and not self.currentTokenIs(TokenType.EOF):
+            statement: Statement = self.parseStatement()
+            if statement is not None:
+                blockStatement.statements.append(statement)
+            
+            self.nextToken()
+
+        return blockStatement
     # endregion
 
     # region expression helpers
@@ -202,4 +266,7 @@ class Parser:
         doubleLiteral: DoubleLiteral = DoubleLiteral(value=float(self.currentToken.literal))
 
         return doubleLiteral
+    
+    def parseIdentifier(self) -> IdentifierLiteral:
+        return IdentifierLiteral(value=self.currentToken.literal)
     # endregion 

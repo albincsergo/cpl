@@ -7,6 +7,9 @@ class NodeType(Enum):
     # statements
     ExpressionStatement = "ExpressionStatement"
     ShallStatement = "ShallStatement"
+    FunctionStatement = "FunctionStatement"
+    ReturnStatement = "ReturnStatement"
+    BlockStatement = "BlockStatement"
 
 
     # expressions
@@ -75,7 +78,51 @@ class ShallStatement(Statement):
             "value": self.value.json(),
             "valueType": self.valueType
         }
+
+class BlockStatement(Statement):
+    def __init__(self, statements: list[Statement] = None) -> None:
+        self.statements = statements if statements is not None else []
     
+    def type(self) -> NodeType:
+        return NodeType.BlockStatement
+    
+    def json(self) -> dict:
+        return {
+            "type": self.type().value,
+            "statements": [statement.json() for statement in self.statements]
+        }
+    
+class ReturnStatement(Statement):
+    def __init__(self, returnValue: Expression = None) -> None:
+        self.returnValue = returnValue
+
+    def type(self) -> NodeType:
+        return NodeType.ReturnStatement
+    
+    def json(self) -> dict:
+        return {
+            "type": self.type().value,
+            "returnValue": self.returnValue.json()
+        }
+    
+class FunctionStatement(Statement):
+    def __init__(self, parameters: list = [], body: BlockStatement = None, name = None, returnType: str = None) -> None:
+        self.parameters = parameters
+        self.body = body
+        self.name = name
+        self.returnType = returnType
+
+    def type(self) -> NodeType:
+        return NodeType.FunctionStatement
+    
+    def json(self) -> dict:
+        return {
+            "type": self.type().value,
+            "name": self.name.json(),
+            "returnType": self.returnType,
+            "parameters": [par.json() for par in self.parameters],
+            "body": self.body.json()
+        }
 # endregion
 
 # region expressions

@@ -3,14 +3,16 @@ from Parser import Parser
 from AST import Program
 from Compiler import Compiler
 import json
+import time
 
 from llvmlite import ir
 import llvmlite.binding as llvm
 from ctypes import CFUNCTYPE, c_int, c_double
 
-LEXER_DEBUG: bool = 1
+LEXER_DEBUG: bool = 0
 PARSER_DEBUG: bool = 0
 COMPILER_DEBUG: bool = 0
+RUN_PROGRAM: bool = 1
 
 if __name__ == '__main__':
     with open("../tests/test.cpl", "r") as f:
@@ -51,3 +53,29 @@ if __name__ == '__main__':
             f.write(str(module))
         print("=== COMPILER DEBUG ===")
         print(module)
+
+    if RUN_PROGRAM:
+        llvm.initialize()
+        llvm.initialize_native_target()
+        llvm.initialize_native_asmprinter()
+        
+        try:
+            llvmIrParsed = llvm.parse_assembly(str(module))
+            llvmIrParsed.verify()
+        except Exception as exc:
+            print(exc)
+            raise
+
+        targetMachine = llvm.Target.from_default_triple().create_target_machine()
+
+        engine = llvm.create_mcjit_compiler(llvmIrParsed, targetMachine)
+        engine.finalize_object()
+
+        entry = engine.get_function_address('mn')
+        cfunc = CFUNCTYPE(c_int)(entry)
+
+        startTime = time.time()
+        result = cfunc()
+        endTime = time.time()
+
+        print(f'\nProgram returned: {result}\n === Executed in {round((endTime - startTime) * 1000, 9)} ms. ===')

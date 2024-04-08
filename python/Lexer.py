@@ -65,6 +65,11 @@ class Lexer:
         
         return self.source[position:self.position]
 
+    def peekChar(self) -> str | None:
+        if self.readPosition >= len(self.source):
+            return None
+        return self.source[self.readPosition]
+
     def nextToken(self) -> Token:
         token: Token = None
 
@@ -74,7 +79,12 @@ class Lexer:
             case '+':
                 token = self.newToken(TokenType.PLUS, self.currentChar)
             case '-':
-                token = self.newToken(TokenType.MINUS, self.currentChar)
+                if (self.peekChar() == '>'):
+                    char = self.currentChar
+                    self.readChar()
+                    token = self.newToken(TokenType.ARROW, char + self.currentChar)
+                else:
+                    token = self.newToken(TokenType.MINUS, self.currentChar)
             case '*':
                 token = self.newToken(TokenType.MULTIPLY, self.currentChar)
             case '/':
@@ -89,6 +99,10 @@ class Lexer:
                 token = self.newToken(TokenType.LPAREN, self.currentChar)
             case ')':
                 token = self.newToken(TokenType.RPAREN, self.currentChar)
+            case '{':
+                token = self.newToken(TokenType.LBRACE, self.currentChar)
+            case '}':
+                token = self.newToken(TokenType.RBRACE, self.currentChar)
             case '=':
                 token = self.newToken(TokenType.EQUALS, self.currentChar)
             case ':':
