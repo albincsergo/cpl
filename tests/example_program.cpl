@@ -1,0 +1,20 @@
+f mn() -> int {
+    _ score: int = 10.
+    _ ratio: double = 2,5.
+
+    if score % 2 == 0 {
+        score = score + 7.
+    } else {
+        score = score + 1.
+    }
+
+    if ratio >= 2,5 {
+        score = score + 3.
+    }
+
+    if true {
+        score = score + 5.
+    }
+
+    r score.
+}

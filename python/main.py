@@ -1,21 +1,38 @@
-from Lexer import Lexer
-from Parser import Parser
-from AST import Program
-from Compiler import Compiler
 import json
+import os
 import time
+from pathlib import Path
+from ctypes import CFUNCTYPE, c_int
 
 from llvmlite import ir
 import llvmlite.binding as llvm
-from ctypes import CFUNCTYPE, c_int, c_double
 
-LEXER_DEBUG: bool = 0
-PARSER_DEBUG: bool = 0
-COMPILER_DEBUG: bool = 0
-RUN_PROGRAM: bool = 1
+from AST import Program
+from Compiler import Compiler
+from Lexer import Lexer
+from Parser import Parser
 
-if __name__ == '__main__':
-    with open("../tests/test.cpl", "r") as f:
+
+def envFlag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+BASE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BASE_DIR.parent
+DEBUG_DIR = REPO_ROOT / "debug"
+
+LEXER_DEBUG: bool = envFlag("CPL_LEXER_DEBUG", False)
+PARSER_DEBUG: bool = envFlag("CPL_PARSER_DEBUG", True)
+COMPILER_DEBUG: bool = envFlag("CPL_COMPILER_DEBUG", False)
+RUN_PROGRAM: bool = envFlag("CPL_RUN_PROGRAM", False)
+
+
+if __name__ == "__main__":
+    sourcePath = Path(os.environ.get("CPL_SOURCE", str(REPO_ROOT / "tests" / "test.cpl")))
+    with open(sourcePath, "r") as f:
         source: str = f.read()
 
     if LEXER_DEBUG:
@@ -26,39 +43,47 @@ if __name__ == '__main__':
 
     lexer: Lexer = Lexer(source)
     parser: Parser = Parser(lexer)
-
     program: Program = parser.parseProgram()
-    
+
     if len(parser.errors) > 0:
         for error in parser.errors:
             print(error)
-        exit(1)
+        raise SystemExit(1)
+
+    DEBUG_DIR.mkdir(exist_ok=True)
 
     if PARSER_DEBUG:
+        astPath = DEBUG_DIR / "ast.json"
         print("=== PARSER DEBUG ===")
-        with open("../debug/ast.json", "w") as f:
+        with open(astPath, "w") as f:
             json.dump(program.json(), f, indent=4)
-        
-        print ("AST saved to ast.json")
+        print(f"AST saved to {astPath}")
 
     compiler: Compiler = Compiler()
     compiler.compile(program)
+
+    if len(compiler.errors) > 0:
+        for error in compiler.errors:
+            print(error)
+        raise SystemExit(1)
 
     # output
     module: ir.Module = compiler.module
     module.triple = llvm.get_default_triple()
 
     if COMPILER_DEBUG:
-        with open("../debug/a.ll", "w") as f:
+        irPath = DEBUG_DIR / "a.ll"
+        with open(irPath, "w") as f:
             f.write(str(module))
         print("=== COMPILER DEBUG ===")
+        print(f"IR saved to {irPath}")
         print(module)
 
     if RUN_PROGRAM:
         llvm.initialize()
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()
-        
+
         try:
             llvmIrParsed = llvm.parse_assembly(str(module))
             llvmIrParsed.verify()
@@ -67,15 +92,20 @@ if __name__ == '__main__':
             raise
 
         targetMachine = llvm.Target.from_default_triple().create_target_machine()
-
         engine = llvm.create_mcjit_compiler(llvmIrParsed, targetMachine)
         engine.finalize_object()
 
-        entry = engine.get_function_address('mn')
+        entryName = os.environ.get("CPL_ENTRY", "mn")
+        entry = engine.get_function_address(entryName)
+        if entry == 0:
+            print(f"Entry function '{entryName}' not found.")
+            raise SystemExit(1)
+
         cfunc = CFUNCTYPE(c_int)(entry)
 
         startTime = time.time()
         result = cfunc()
         endTime = time.time()
 
-        print(f'\nProgram returned: {result}\n === Executed in {round((endTime - startTime) * 1000, 9)} ms. ===')
+        elapsedMs = round((endTime - startTime) * 1000, 9)
+        print(f"\nProgram returned: {result}\n === Executed in {elapsedMs} ms. ===")

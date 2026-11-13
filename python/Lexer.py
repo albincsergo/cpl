@@ -1,6 +1,7 @@
 from Token import Token, TokenType, lookupIdentifier
 from typing import Any
 
+
 class Lexer:
     def __init__(self, source: str) -> None:
         self.source = source
@@ -36,7 +37,7 @@ class Lexer:
         decimalCounter: int = 0
 
         output: str = ""
-        while self.currentChar.isdigit() or self.currentChar == ',':
+        while self.currentChar is not None and (self.currentChar.isdigit() or self.currentChar == ','):
             if self.currentChar == ',':
                 decimalCounter += 1
 
@@ -55,7 +56,7 @@ class Lexer:
         else:
             return self.newToken(TokenType.DOUBLE, float(output.replace(',', '.')))
         
-    def isLetter(self, char: str) -> Token:
+    def isLetter(self, char: str) -> bool:
         return 'a' <= char and char <= 'z' or 'A' <= char and char <= 'Z' or char == '_'
 
     def readIdentifier(self) -> str:
@@ -93,6 +94,34 @@ class Lexer:
                 token = self.newToken(TokenType.POWER, self.currentChar)
             case '%':
                 token = self.newToken(TokenType.MODULUS, self.currentChar)
+            case '<':
+                if self.peekChar() == '=':
+                    char = self.currentChar
+                    self.readChar()
+                    token = self.newToken(TokenType.LESSEQ, char + self.currentChar)
+                else: 
+                    token = self.newToken(TokenType.LESS, self.currentChar)
+            case '>':
+                if self.peekChar() == '=':
+                    char = self.currentChar
+                    self.readChar()
+                    token = self.newToken(TokenType.GREATEREQ, char + self.currentChar)
+                else:
+                    token = self.newToken(TokenType.GREATER, self.currentChar)
+            case '=':
+                if self.peekChar() == '=':
+                    char = self.currentChar
+                    self.readChar()
+                    token = self.newToken(TokenType.EQEQ, char + self.currentChar)
+                else:
+                    token = self.newToken(TokenType.EQUALS, self.currentChar)
+            case '!':
+                if self.peekChar() == '=':
+                    char = self.currentChar
+                    self.readChar()
+                    token = self.newToken(TokenType.NOTEG, char + self.currentChar)
+                else:
+                    token = self.newToken(TokenType.ILLEGAL, self.currentChar)
             case '.':
                 token = self.newToken(TokenType.DOT, self.currentChar)
             case '(':
@@ -103,8 +132,6 @@ class Lexer:
                 token = self.newToken(TokenType.LBRACE, self.currentChar)
             case '}':
                 token = self.newToken(TokenType.RBRACE, self.currentChar)
-            case '=':
-                token = self.newToken(TokenType.EQUALS, self.currentChar)
             case ':':
                 token = self.newToken(TokenType.COLON, self.currentChar)
             case None:
@@ -114,8 +141,8 @@ class Lexer:
                     literal: str = self.readIdentifier()
                     tokenType: TokenType = lookupIdentifier(literal)
                     token = self.newToken(tokenType, literal)
-                    return self.newToken(tokenType, literal)
-                elif self.currentChar.isdigit():
+                    return token
+                elif self.currentChar is not None and self.currentChar.isdigit():
                     token = self.readNumber()
                     return token
                 else:
