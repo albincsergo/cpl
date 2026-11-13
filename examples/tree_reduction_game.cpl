@@ -1,0 +1,95 @@
+// Codeforces 2272F - Tree Reduction Game
+//
+// Earlier roots form a path behind the current root that can never be entered again, so all that
+// is left of it is one "delete it" move. With f(c, p) meaning "the player to move wins at c, having
+// come from p":
+//     f(c, p) = deg(c) is odd, or some neighbour d != p of c has f(d, c) = false
+// and Bob wins with root r exactly when deg(r) is even and f(c, r) holds for every neighbour c.
+// Rerooting computes f for both directions of every edge in O(n).
+
+f mn() {
+    _ t: it.
+    in @ t.
+    wh t > 0 {
+        t--.
+        _ n: it.
+        in @ n.
+
+        // the tree as compressed adjacency lists: the neighbours of v are adj[start[v] .. start[v + 1])
+        _ eu: vec<it> = vec<it>(n - 1).
+        _ ev: vec<it> = vec<it>(n - 1).
+        _ deg: vec<it> = vec<it>(n + 1).
+        for (_ i: it = 0. i < n - 1. ++i) {
+            in @ eu[i] @ ev[i].
+            deg[eu[i]]++.
+            deg[ev[i]]++.
+        }
+        _ start: vec<it> = vec<it>(n + 2).
+        for (_ v: it = 1. v <= n. ++v) { start[v + 1] = start[v] + deg[v]. }
+        _ next: vec<it> = vec<it>(n + 2).
+        for (_ v: it = 1. v <= n + 1. ++v) { next[v] = start[v]. }
+        _ adj: vec<it> = vec<it>(2 * (n - 1)).
+        for (_ i: it = 0. i < n - 1. ++i) {
+            adj[next[eu[i]]] = ev[i].
+            next[eu[i]]++.
+            adj[next[ev[i]]] = eu[i].
+            next[ev[i]]++.
+        }
+
+        // breadth-first order from vertex 1
+        _ order: vec<it>.
+        _ parent: vec<it> = vec<it>(n + 1).
+        order.pb(1).
+        for (_ head: it = 0. head < order.sz(). ++head) {
+            _ u: it = order[head].
+            for (_ k: it = start[u]. k < start[u + 1]. ++k) {
+                _ v: it = adj[k].
+                if v != parent[u] {
+                    parent[v] = u.
+                    order.pb(v).
+                }
+            }
+        }
+
+        // down[c] = f(c, parent(c)), from the leaves up
+        _ down: vec<bo> = vec<bo>(n + 1).
+        _ childFalse: vec<it> = vec<it>(n + 1).
+        for (_ i: it = n - 1. i >= 0. --i) {
+            _ c: it = order[i].
+            down[c] = deg[c] % 2 == 1 || childFalse[c] > 0.
+            if c != 1 && !down[c] { childFalse[parent[c]]++. }
+        }
+
+        // up[c] = f(parent(c), c), from the root down; totalFalse counts every neighbour of p that loses
+        _ up: vec<bo> = vec<bo>(n + 1, true).
+        _ totalFalse: vec<it> = vec<it>(n + 1).
+        for (_ i: it = 0. i < n. ++i) {
+            _ p: it = order[i].
+            totalFalse[p] = childFalse[p].
+            if p != 1 && !up[p] { totalFalse[p]++. }
+            for (_ k: it = start[p]. k < start[p + 1]. ++k) {
+                _ c: it = adj[k].
+                if c == parent[p] { cont. }
+                _ others: it = totalFalse[p].
+                if !down[c] { others--. }
+                up[c] = deg[p] % 2 == 1 || others > 0.
+            }
+        }
+
+        _ answer: vec<it>.
+        for (_ root: it = 1. root <= n. ++root) {
+            if deg[root] % 2 == 0 && totalFalse[root] == 0 { answer.pb(root). }
+        }
+
+        if answer.emp() {
+            ou @@ "Alice" @@ el.
+            cont.
+        }
+        ou @@ "Bob" @@ el @@ answer.sz() @@ el.
+        for (_ i: it = 0. i < answer.sz(). ++i) {
+            if i > 0 { ou @@ ' '. }
+            ou @@ answer[i].
+        }
+        ou @@ el.
+    }
+}

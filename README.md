@@ -22,7 +22,7 @@ f mn() -> it {
 }
 ```
 
-See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for some classic problems: BFS, Dijkstra, knapsack, a prime sieve and binary search.
+See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for some classic problems: BFS, Dijkstra, knapsack, a prime sieve, binary search and a solution to [Codeforces 2272F](https://codeforces.com/contest/2272/problem/F). On that problem, CPL runs at the same speed as the equivalent C++.
 
 ## Setup
 
