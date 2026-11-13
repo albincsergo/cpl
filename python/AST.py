@@ -30,6 +30,7 @@ class NodeType(Enum):
     IndexExpression = "IndexExpression"
     MemberExpression = "MemberExpression"
     CastExpression = "CastExpression"
+    ConditionalExpression = "ConditionalExpression"
 
     # literals
     IntegerLiteral = "IntegerLiteral"
@@ -221,6 +222,14 @@ class MemberExpression(Expression):
     def __init__(self, leftNode: Expression, name: str) -> None:
         self.leftNode = leftNode
         self.name = name
+
+
+class ConditionalExpression(Expression):
+    # condition ? consequence : alternative
+    def __init__(self, condition: Expression, consequence: Expression = None, alternative: Expression = None) -> None:
+        self.condition = condition
+        self.consequence = consequence
+        self.alternative = alternative
 
 
 class CastExpression(Expression):

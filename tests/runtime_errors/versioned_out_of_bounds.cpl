@@ -1,0 +1,9 @@
+// the loop is checked once up front, finds an index out of range, and falls back to checking every step
+f mn() {
+    _ v: vec<it> = vec<it>(10).
+    _ total: it.
+    for (i in rng(0, 11)) {
+        total += v[i].
+        ou @@ i @@ ' '.
+    }
+}

@@ -120,8 +120,13 @@ class Compiler:
         # never overlap, and telling LLVM so lets it keep v.len and v.data in registers inside loops
         self.tbaaRoot = self.module.add_metadata(["cpl alias classes"])
         self.tbaaTags: dict[str, ir.Value] = {}
+        self.invariantNode: ir.Value | None = None
         self.pointerTags: dict[ir.Value, str] = {}
         self.mapSlotCount: int = 0
+        # > 0 while compiling the expression inside v[...]
+        self.indexDepth: int = 0
+        # index expressions proven in bounds by loop versioning (see rangeLoop)
+        self.uncheckedIndexes: set[int] = set()
         # generated functions: comparators for sorting, heap operations for priority queues
         self.helpers: dict[str, ir.Function] = {}
 
@@ -154,6 +159,7 @@ class Compiler:
                 self.declareFunction(statement)
 
         # pass 3: global variables, initialized by cpl.init before mn runs
+        self.reassignedNames = assignedNames(program)
         initFunction: ir.Function = ir.Function(self.module, ir.FunctionType(VOID, []), name="cpl.init")
         initFunction.linkage = "internal"
         self.startFunction(initFunction)
@@ -266,6 +272,9 @@ class Compiler:
 
     def declareFunction(self, node: FunctionStatement) -> None:
         name: str = node.name
+        if name in ["f", "r"]:
+            self.error(f"a function can't be called '{name}', since {name}(...) at the start of a statement means {'func' if name == 'f' else 'ret'}", node)
+            return
         if name in self.functions:
             self.error(f"function '{name}' is already defined", node)
             return
@@ -716,6 +725,8 @@ class Compiler:
             value: ir.Value | None = None
             if node.value is not None:
                 resolved: TypedValue | None = self.visitExpression(node.value)
+                if resolved is not None and self.atGlobalScope and self.declareConstant(name, valueType, resolved):
+                    continue
                 if resolved is not None:
                     value = self.convert(resolved, valueType, node.value, f"the declaration of {name}")
                 if value is None:
@@ -729,11 +740,38 @@ class Compiler:
                 pointer: ir.Value = ir.GlobalVariable(self.module, valueType.irType, name=f"global.{name}")
                 pointer.linkage = "internal"
                 pointer.initializer = ir.Constant(valueType.irType, None)
+                # globals live apart from everything else, so give each one its own alias class
+                self.withTag(pointer, f"global {name}")
             else:
                 pointer = self.allocate(valueType.irType, name)
 
             self.builder.store(value, pointer)
             self.environment.define(name, pointer, valueType)
+
+    def declareConstant(self, name: str, valueType: CType, resolved: TypedValue) -> bool:
+        # a global number that starts as a literal and is never assigned anywhere is a constant, so
+        # '% mod' compiles to a multiplication instead of a 40 cycle division, as with const in C++
+        if name in self.reassignedNames or resolved.literal is None or valueType.kind not in ["int", "char", "float"]:
+            return False
+        literal: int | float = resolved.literal
+        if valueType.kind == "float":
+            constant: ir.Constant = ir.Constant(DOUBLE, float(literal))
+        else:
+            if not float(literal).is_integer():
+                return False
+            number: int = int(literal)
+            low: int = -(2 ** (valueType.bits - 1)) if valueType.kind == "int" and valueType.signed else 0
+            high: int = 2 ** (valueType.bits - 1) if valueType.kind == "int" and valueType.signed else 2 ** valueType.bits
+            if not low <= number < high:
+                return False
+            constant = ir.Constant(valueType.irType, number)
+
+        variable: ir.GlobalVariable = ir.GlobalVariable(self.module, valueType.irType, name=f"constant.{name}")
+        variable.linkage = "internal"
+        variable.global_constant = True
+        variable.initializer = constant
+        self.environment.define(name, variable, valueType)
+        return True
 
     def visitAssignStatement(self, node: AssignStatement) -> None:
         # the right side goes first: it may grow a map or vector that the target points into
@@ -786,6 +824,9 @@ class Compiler:
         self.builder.ret(value)
 
     def visitIfStatement(self, node: IfStatement) -> None:
+        if self.tryBranchlessIf(node):
+            return
+
         condition: ir.Value | None = self.visitCondition(node.condition)
         if condition is None:
             return
@@ -821,6 +862,68 @@ class Compiler:
         # every branch returned, so nothing can run after this if
         if not mergeReachable:
             self.builder.unreachable()
+
+    def tryBranchlessIf(self, node: IfStatement) -> bool:
+        # if c { x = A. } else { x = B. }  ->  x = c ? A : B without a branch, when computing both
+        # sides is harmless: no side effects, no division, and only indexes proven in bounds. A
+        # mispredicted branch in a DP loop costs more than computing both values.
+        def single(block: Statement | None) -> AssignStatement | None:
+            if block is None or block.type() != NodeType.BlockStatement or len(block.statements) != 1:
+                return None
+            statement: Statement = block.statements[0]
+            return statement if statement.type() == NodeType.AssignStatement and statement.operator == "=" else None
+
+        then: AssignStatement | None = single(node.consequence)
+        if then is None:
+            return False
+        otherwise: AssignStatement | None = None
+        if node.alternative is not None:
+            otherwise = single(node.alternative)
+            if otherwise is None or otherwise.target.json() != then.target.json():
+                return False
+
+        target: Expression = then.target
+        if not (target.type() == NodeType.IdentifierLiteral or self.isHarmless(target)):
+            return False
+        if not self.isHarmless(then.rightValue) or (otherwise is not None and not self.isHarmless(otherwise.rightValue)):
+            return False
+
+        condition: ir.Value | None = self.visitCondition(node.condition)
+        if condition is None:
+            return True
+        chosen: TypedValue | None = self.visitExpression(then.rightValue)
+        other: TypedValue | None = self.visitExpression(otherwise.rightValue) if otherwise is not None else None
+        address = self.visitAddress(target)
+        if chosen is None or address is None or (otherwise is not None and other is None):
+            return True
+        pointer, targetType = address
+        if other is None:
+            other = TypedValue(self.load(pointer), targetType)
+
+        first: ir.Value | None = self.convert(chosen, targetType, then, "this assignment")
+        second: ir.Value | None = self.convert(other, targetType, otherwise or then, "this assignment")
+        if first is not None and second is not None:
+            self.store(self.builder.select(condition, first, second), pointer)
+        return True
+
+    def isHarmless(self, expression: Expression) -> bool:
+        # safe to evaluate even when its branch isn't taken
+        match expression.type():
+            case NodeType.IntegerLiteral | NodeType.DoubleLiteral | NodeType.BooleanLiteral | NodeType.CharLiteral:
+                return True
+            case NodeType.IdentifierLiteral:
+                return self.environment.lookup(expression.value) is not None
+            case NodeType.PrefixExpression:
+                return self.isHarmless(expression.rightNode)
+            case NodeType.InfixExpression:
+                return expression.operator not in ["/", "%", "^"] and self.isHarmless(expression.leftNode) and self.isHarmless(expression.rightNode)
+            case NodeType.IndexExpression:
+                return id(expression) in self.uncheckedIndexes and self.isHarmless(expression.index)
+            case NodeType.CallExpression:
+                function: Expression = expression.function
+                return (function.type() == NodeType.IdentifierLiteral and function.value in ["min", "max", "abs"]
+                        and function.value not in self.functions and all(self.isHarmless(argument) for argument in expression.arguments))
+        return False
 
     def visitWhileStatement(self, node: WhileStatement) -> None:
         function: ir.Function = self.builder.function
@@ -939,17 +1042,16 @@ class Compiler:
             converted[0], converted[1], converted[2] if len(converted) == 3 else ir.Constant(counterType.irType, 1))
 
         counter: ir.Value = self.allocate(counterType.irType, "counter")
-        self.builder.store(start, counter)
         variable: ir.Value = self.loopVariable(node.names[0], counterType)
 
         compare = self.builder.icmp_signed if counterType.signed else self.builder.icmp_unsigned
         stepIsLiteral: bool = len(arguments) < 3 or arguments[2].type() == NodeType.IntegerLiteral or (
             arguments[2].type() == NodeType.PrefixExpression and arguments[2].operator == "-" and arguments[2].rightNode.type() == NodeType.IntegerLiteral)
+        negative: bool = len(arguments) == 3 and arguments[2].type() == NodeType.PrefixExpression
 
         def condition() -> ir.Value:
             current: ir.Value = self.builder.load(counter)
             if stepIsLiteral:
-                negative: bool = len(arguments) == 3 and arguments[2].type() == NodeType.PrefixExpression
                 return compare(">" if negative else "<", current, end)
             # the direction depends on the sign of the step
             goingUp: ir.Value = self.builder.icmp_signed(">", step, zero)
@@ -958,10 +1060,137 @@ class Compiler:
         def bodyStart() -> None:
             self.builder.store(self.builder.load(counter), variable)
 
-        def advance() -> None:
-            self.builder.store(self.builder.add(self.builder.load(counter), step), counter)
+        # with a step of 1 or -1 the counter stops at the end before it could overflow, which lets LLVM
+        # widen it to 64 bits; other steps keep wrapping arithmetic
+        unitStep: bool = len(arguments) < 3 or (stepIsLiteral and self.literalValue(arguments[2]) in [1, -1])
 
-        self.emitLoop(condition, bodyStart, advance, node.body)
+        def advance() -> None:
+            flags: tuple = ("nsw",) if unitStep else ()
+            self.builder.store(self.builder.add(self.builder.load(counter), step, flags=flags), counter)
+
+        def emit() -> None:
+            self.builder.store(start, counter)
+            self.emitLoop(condition, bodyStart, advance, node.body)
+
+        # loop versioning: if every v[i + E] in the body is in bounds for the whole range, checked
+        # once here, run a copy of the loop without per-element bounds checks
+        candidates: list[IndexExpression] = self.uncheckableIndexes(node.body, node.names[0]) if stepIsLiteral and counterType.signed else []
+        if not candidates:
+            emit()
+            return
+
+        one: ir.Constant = ir.Constant(counterType.irType, 1)
+        if negative:
+            isEmpty: ir.Value = self.builder.icmp_signed("<=", start, end)
+            lowest, highest = self.builder.add(end, one), start
+        else:
+            isEmpty = self.builder.icmp_signed(">=", start, end)
+            lowest, highest = start, self.builder.sub(end, one)
+
+        inBounds: ir.Value = ir.Constant(I1, 1)
+        for candidate in candidates:
+            container: TypedValue = self.visitExpression(candidate.leftNode)
+            length: ir.Value = self.vecLength(container.value) if container.ctype.kind == "vec" else self.stringLength(container.value)
+            # the index grows with i, so the smallest and largest indices come from the ends of the range
+            self.builder.store(lowest, variable)
+            smallest: ir.Value = self.convert(self.visitIndexValue(candidate.index), LL, candidate, "")
+            self.builder.store(highest, variable)
+            largest: ir.Value = self.convert(self.visitIndexValue(candidate.index), LL, candidate, "")
+            fits: ir.Value = self.builder.and_(self.builder.icmp_signed(">=", smallest, ir.Constant(I64, 0)),
+                                               self.builder.icmp_signed("<", largest, length))
+            inBounds = self.builder.and_(inBounds, fits)
+
+        with self.builder.if_else(self.builder.or_(isEmpty, inBounds)) as (fast, checked):
+            with fast:
+                added: set[int] = {id(candidate) for candidate in candidates} - self.uncheckedIndexes
+                self.uncheckedIndexes |= added
+                emit()
+                self.uncheckedIndexes -= added
+            with checked:
+                emit()
+
+    def literalValue(self, expression: Expression) -> int | None:
+        if expression.type() == NodeType.IntegerLiteral:
+            return expression.value
+        if expression.type() == NodeType.PrefixExpression and expression.operator == "-" and expression.rightNode.type() == NodeType.IntegerLiteral:
+            return -expression.rightNode.value
+        return None
+
+    def uncheckableIndexes(self, body: BlockStatement, variable: str) -> list[IndexExpression]:
+        # the v[i + E] in a loop body whose bounds can be checked once before the loop: v must keep
+        # its length (no pb, pp, clr, swap or user function calls in the body, and v isn't reassigned),
+        # and E must not change inside the loop
+        changed: set[str] = assignedNames(body) | declaredNames(body)
+        if variable in changed:
+            return []
+
+        mayResize: bool = False
+        callsFunctions: bool = False
+        indexes: list[IndexExpression] = []
+        for node in walk(body):
+            match node.type():
+                case NodeType.CallExpression:
+                    function: Expression = node.function
+                    if function.type() == NodeType.MemberExpression:
+                        if METHOD_ALIASES.get(function.name, function.name) in ["pb", "pp", "clr", "ps"]:
+                            mayResize = True
+                    elif function.type() == NodeType.IdentifierLiteral:
+                        if function.value in self.functions:
+                            callsFunctions = True
+                            mayResize = True
+                        elif function.value == "swap":
+                            mayResize = True
+                case NodeType.IndexExpression:
+                    indexes.append(node)
+
+        candidates: list[IndexExpression] = []
+        for index in indexes:
+            if index.leftNode.type() != NodeType.IdentifierLiteral or index.leftNode.value in changed:
+                continue
+            record = self.environment.lookup(index.leftNode.value)
+            if record is None:
+                continue
+            pointer, ctype = record
+            if ctype.kind == "vec" and mayResize:
+                continue
+            # a string is immutable, but a function may still assign a new one to a global
+            if ctype.kind == "string" and callsFunctions and isinstance(pointer, ir.GlobalVariable):
+                continue
+            if ctype.kind not in ["vec", "string"]:
+                continue
+            if self.loopCoefficient(index.index, variable, changed) == 1:
+                candidates.append(index)
+        return candidates
+
+    def loopCoefficient(self, expression: Expression, variable: str, changed: set[str]) -> int | None:
+        # how much the expression grows per step of the loop variable, or None if it's not of the form
+        # i + E with E fixed during the loop (only integer variables, literals, + - * and negation)
+        match expression.type():
+            case NodeType.IdentifierLiteral:
+                if expression.value == variable:
+                    return 1
+                if expression.value in changed:
+                    return None
+                record = self.environment.lookup(expression.value)
+                return 0 if record is not None and record[1].isInteger and not isinstance(record[0], ir.Function) else None
+            case NodeType.IntegerLiteral:
+                return 0
+            case NodeType.PrefixExpression:
+                if expression.operator != "-":
+                    return None
+                inner: int | None = self.loopCoefficient(expression.rightNode, variable, changed)
+                return None if inner is None else -inner
+            case NodeType.InfixExpression:
+                if expression.operator not in ["+", "-", "*"]:
+                    return None
+                left: int | None = self.loopCoefficient(expression.leftNode, variable, changed)
+                right: int | None = self.loopCoefficient(expression.rightNode, variable, changed)
+                if left is None or right is None:
+                    return None
+                if expression.operator == "*":
+                    return 0 if left == 0 and right == 0 else None
+                return left + right if expression.operator == "+" else left - right
+        return None
 
     def collectionLoop(self, node) -> None:
         collection: TypedValue | None = self.visitExpression(node.iterable)
@@ -1004,7 +1233,7 @@ class Compiler:
             # read again every time around, so pushing inside the loop is safe
             if ctype.kind == "vec":
                 return self.vecLength(collection.value)
-            return self.callRuntime("cpl_str_len", [collection.value])
+            return self.stringLength(collection.value)
 
         def bodyStart() -> None:
             current: ir.Value = self.builder.load(index)
@@ -1013,7 +1242,8 @@ class Compiler:
             if ctype.kind == "vec":
                 element: ir.Value = self.load(self.vecSlot(collection.value, elem, current))
             else:
-                element = self.callRuntime("cpl_str_at", [collection.value, current])
+                # the loop condition already checked the index
+                element = self.stringByte(collection.value, current, checked=False)
             self.builder.store(element, elemVariable)
 
         self.emitLoop(lambda: self.builder.icmp_signed("<", self.builder.load(index), length()), bodyStart,
@@ -1192,6 +1422,8 @@ class Compiler:
                 result = self.visitMemberExpression(node)
             case NodeType.CastExpression:
                 result = self.visitCastExpression(node)
+            case NodeType.ConditionalExpression:
+                result = self.visitConditionalExpression(node)
             case _:
                 self.error(f"can't compile expression of type {node.type().value}", node)
                 return None
@@ -1257,7 +1489,7 @@ class Compiler:
             return None
 
         pointer, ctype = record
-        return TypedValue(self.builder.load(pointer), ctype)
+        return TypedValue(self.load(pointer), ctype)
 
     def visitPrefixExpression(self, node: PrefixExpression) -> TypedValue | None:
         if node.operator == "!":
@@ -1275,6 +1507,8 @@ class Compiler:
         if node.operator == "-":
             if operand.literal is not None and operand.ctype.kind == "float":
                 return TypedValue(ir.Constant(DOUBLE, -operand.literal), DU, literal=-operand.literal)
+            if operand.literal is not None and operand.ctype.kind == "int" and operand.ctype.signed:
+                return TypedValue(ir.Constant(operand.ctype.irType, -operand.literal), operand.ctype, literal=-operand.literal)
             if operand.ctype.kind == "float":
                 return TypedValue(self.builder.fneg(operand.value), DU)
             if operand.ctype.kind == "int":
@@ -1296,6 +1530,54 @@ class Compiler:
             return None
 
         return self.binaryOperation(node.operator, left, right, node)
+
+    def visitConditionalExpression(self, node) -> TypedValue | None:
+        # only the chosen side runs; both sides end up with a common type
+        condition: ir.Value | None = self.visitCondition(node.condition)
+        if condition is None:
+            return None
+
+        function: ir.Function = self.builder.function
+        thenBlock: ir.Block = function.append_basic_block("choose_then")
+        elseBlock: ir.Block = function.append_basic_block("choose_else")
+        mergeBlock: ir.Block = function.append_basic_block("choose_end")
+        self.builder.cbranch(condition, thenBlock, elseBlock)
+
+        self.builder.position_at_end(thenBlock)
+        consequence: TypedValue | None = self.visitExpression(node.consequence)
+        thenEnd: ir.Block = self.builder.block
+        self.builder.position_at_end(elseBlock)
+        alternative: TypedValue | None = self.visitExpression(node.alternative)
+        elseEnd: ir.Block = self.builder.block
+        if consequence is None or alternative is None:
+            return None
+
+        leftType: CType = consequence.ctype
+        rightType: CType = alternative.ctype
+        if leftType == rightType:
+            resultType: CType = leftType
+        elif leftType.isNumeric and rightType.isNumeric:
+            resultType = self.commonNumericType(leftType, rightType)
+        elif leftType.kind == "nil" and rightType.kind == "struct" or leftType.kind == "struct" and rightType.kind == "nil":
+            resultType = rightType if leftType.kind == "nil" else leftType
+        else:
+            self.error(f"the two sides of ? : must have the same type, not {leftType} and {rightType}", node)
+            return None
+
+        incoming: list[tuple[ir.Value, ir.Block]] = []
+        for value, end, side in [(consequence, thenEnd, node.consequence), (alternative, elseEnd, node.alternative)]:
+            self.builder.position_at_end(end)
+            converted: ir.Value | None = self.convert(value, resultType, side, "", explicit=resultType.isNumeric)
+            if converted is None:
+                return None
+            incoming.append((converted, self.builder.block))
+            self.builder.branch(mergeBlock)
+
+        self.builder.position_at_end(mergeBlock)
+        result: ir.PhiInstr = self.builder.phi(resultType.irType)
+        for value, block in incoming:
+            result.add_incoming(value, block)
+        return TypedValue(result, resultType)
 
     def visitLogicalExpression(self, node: InfixExpression) -> TypedValue | None:
         # short-circuit: the right side only runs when it can change the result
@@ -1403,6 +1685,12 @@ class Compiler:
             return None
 
         signed: bool = commonType.signed
+        if left.literal is not None and right.literal is not None and operator in ["+", "-", "*"]:
+            folded: int = {"+": int.__add__, "-": int.__sub__, "*": int.__mul__}[operator](int(left.literal), int(right.literal))
+            low: int = -(2 ** (commonType.bits - 1)) if signed else 0
+            high: int = 2 ** (commonType.bits - 1) if signed else 2 ** commonType.bits
+            if low <= folded < high:
+                return TypedValue(ir.Constant(commonType.irType, folded), commonType, literal=folded)
         match operator:
             case "+":
                 return TypedValue(self.builder.add(leftValue, rightValue), commonType)
@@ -1511,6 +1799,13 @@ class Compiler:
     def commonNumericType(self, leftType: CType, rightType: CType) -> CType:
         if leftType.kind == "float" or rightType.kind == "float":
             return DU
+
+        # index arithmetic is done in 64 bits: an index that would overflow an it is out of bounds
+        # anyway, and it lets LLVM treat v[i - w] as plain address arithmetic
+        if self.indexDepth > 0:
+            unsigned: bool = (leftType.kind == "int" and not leftType.signed and leftType.bits == 64) or \
+                             (rightType.kind == "int" and not rightType.signed and rightType.bits == 64)
+            return ULL if unsigned else LL
 
         # characters do arithmetic as it, like in C
         if leftType.kind == "char":
@@ -1834,20 +2129,27 @@ class Compiler:
         field: ir.Value = self.builder.gep(pointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True)
         return self.withTag(field, f"struct {ctype.name} field {index}")
 
+    def visitIndexValue(self, expression: Expression) -> TypedValue | None:
+        self.indexDepth += 1
+        try:
+            return self.visitExpression(expression)
+        finally:
+            self.indexDepth -= 1
+
     def visitIndexExpression(self, node: IndexExpression) -> TypedValue | None:
         container: TypedValue | None = self.visitExpression(node.leftNode)
         if container is None:
             return None
 
         if container.ctype.kind == "string":
-            index: TypedValue | None = self.visitExpression(node.index)
+            index: TypedValue | None = self.visitIndexValue(node.index)
             if index is None:
                 return None
             if not index.ctype.isInteger:
                 self.error(f"string indices must be integers, not {index.ctype}", node.index)
                 return None
             indexValue: ir.Value = self.convert(index, LL, node.index, "the index")
-            return TypedValue(self.callRuntime("cpl_str_at", [container.value, indexValue]), CH)
+            return TypedValue(self.stringByte(container.value, indexValue, checked=id(node) not in self.uncheckedIndexes), CH)
 
         address = self.indexAddress(container, node)
         if address is None:
@@ -1863,7 +2165,7 @@ class Compiler:
             self.error(f"a {container.ctype} can't be indexed", node)
             return None
 
-        index: TypedValue | None = self.visitExpression(node.index)
+        index: TypedValue | None = self.visitIndexValue(node.index) if container.ctype.kind == "vec" else self.visitExpression(node.index)
         if index is None:
             return None
 
@@ -1872,6 +2174,8 @@ class Compiler:
                 self.error(f"vector indices must be integers, not {index.ctype}", node.index)
                 return None
             indexValue: ir.Value = self.convert(index, LL, node.index, "the index")
+            if id(node) in self.uncheckedIndexes:
+                return self.vecSlot(container.value, container.ctype.elem, indexValue), container.ctype.elem
             return self.vecElementPointer(container.value, container.ctype.elem, indexValue), container.ctype.elem
 
         pointer: ir.Value | None = self.mapSlot(container.value, container.ctype, index, node.index)
@@ -2186,6 +2490,48 @@ class Compiler:
     # endregion
 
     # region helpers
+    def invariantLoad(self, pointer: ir.Value, tag: str) -> ir.Value:
+        # strings never change after they're made, so LLVM may hoist and merge these loads freely
+        load: ir.Instruction = self.tagged(self.builder.load(pointer), tag)
+        if self.invariantNode is None:
+            self.invariantNode = self.module.add_metadata([])
+        load.set_metadata("invariant.load", self.invariantNode)
+        return load
+
+    def stringHeader(self, string: ir.Value) -> ir.Value:
+        return self.builder.bitcast(string, ir.LiteralStructType([I64, BYTE_POINTER]).as_pointer())
+
+    def stringLength(self, string: ir.Value) -> ir.Value:
+        # a nil string is empty; bit 62 of the stored length is the runtime's "growable" flag
+        isNil: ir.Value = self.builder.icmp_unsigned("==", string, ir.Constant(BYTE_POINTER, None))
+        before: ir.Block = self.builder.block
+        function: ir.Function = self.builder.function
+        loadBlock: ir.Block = function.append_basic_block("string_length")
+        doneBlock: ir.Block = function.append_basic_block("string_length_done")
+        self.builder.cbranch(isNil, doneBlock, loadBlock)
+
+        self.builder.position_at_end(loadBlock)
+        field: ir.Value = self.builder.gep(self.stringHeader(string), [ir.Constant(I32, 0), ir.Constant(I32, 0)], inbounds=True)
+        stored: ir.Value = self.invariantLoad(field, "string header")
+        length: ir.Value = self.builder.and_(stored, ir.Constant(I64, (1 << 62) - 1))
+        self.builder.branch(doneBlock)
+
+        self.builder.position_at_end(doneBlock)
+        result: ir.PhiInstr = self.builder.phi(I64)
+        result.add_incoming(ir.Constant(I64, 0), before)
+        result.add_incoming(length, loadBlock)
+        return result
+
+    def stringByte(self, string: ir.Value, index: ir.Value, checked: bool = True) -> ir.Value:
+        if checked:
+            length: ir.Value = self.stringLength(string)
+            with self.builder.if_then(self.builder.icmp_unsigned(">=", index, length), likely=False):
+                self.callRuntime("cpl_panic_index", [index, length])
+                self.builder.unreachable()
+        field: ir.Value = self.builder.gep(self.stringHeader(string), [ir.Constant(I32, 0), ir.Constant(I32, 1)], inbounds=True)
+        data: ir.Value = self.invariantLoad(field, "string header")
+        return self.invariantLoad(self.builder.gep(data, [index], inbounds=True), "string bytes")
+
     def tbaaTag(self, name: str) -> ir.Value:
         if name not in self.tbaaTags:
             typeNode = self.module.add_metadata([name, self.tbaaRoot, ir.Constant(I64, 0)])
@@ -2215,6 +2561,54 @@ class Compiler:
         block = self.builder.block
         return block is not None and block.is_terminated
     # endregion
+
+
+def walk(value):
+    # every node under value, depth first
+    if isinstance(value, list) or isinstance(value, tuple):
+        for item in value:
+            yield from walk(item)
+        return
+    if not isinstance(value, Node):
+        return
+    yield value
+    for child in vars(value).values():
+        yield from walk(child)
+
+
+def declaredNames(body) -> set[str]:
+    names: set[str] = set()
+    for node in walk(body):
+        if node.type() in [NodeType.ShallStatement, NodeType.ForEachStatement]:
+            names.update(node.names)
+    return names
+
+
+def assignedNames(program) -> set[str]:
+    # every name that something assigns to, reads input into or swaps, anywhere in the program
+    names: set[str] = set()
+
+    def visit(value) -> None:
+        if isinstance(value, list) or isinstance(value, tuple):
+            for item in value:
+                visit(item)
+            return
+        if not isinstance(value, Node):
+            return
+        match value.type():
+            case NodeType.AssignStatement:
+                if value.target.type() == NodeType.IdentifierLiteral:
+                    names.add(value.target.value)
+            case NodeType.InputStatement:
+                names.update(target.value for target in value.targets if target.type() == NodeType.IdentifierLiteral)
+            case NodeType.CallExpression:
+                if value.function.type() == NodeType.IdentifierLiteral and value.function.value == "swap":
+                    names.update(argument.value for argument in value.arguments if argument.type() == NodeType.IdentifierLiteral)
+        for child in vars(value).values():
+            visit(child)
+
+    visit(program.statements if isinstance(program, Program) else program)
+    return names
 
 
 # region builtin functions
@@ -2282,6 +2676,71 @@ def builtinGetline(compiler: Compiler, node: CallExpression) -> TypedValue | Non
     return TypedValue(compiler.callRuntime("cpl_read_line", []), ST)
 
 
+def integerArgument(compiler: Compiler, node: CallExpression) -> TypedValue:
+    (value,) = numericArguments(compiler, node, 1)
+    if not value.ctype.isInteger:
+        compiler.error(f"{node.function.value}() needs an integer, not {value.ctype}", node)
+        raise CompileError()
+    return value if value.ctype.kind == "int" else TypedValue(compiler.builder.zext(value.value, I32), IT)
+
+
+def builtinBitCount(compiler: Compiler, node: CallExpression) -> TypedValue | None:
+    # pc(x): set bits, ctz(x): trailing zeros, clz(x): leading zeros, like __builtin_popcount and friends
+    value: TypedValue = integerArgument(compiler, node)
+    irType: ir.IntType = value.ctype.irType
+    name: str = {"pc": "ctpop", "ctz": "cttz", "clz": "ctlz"}[node.function.value]
+    arguments: list[ir.Value] = [value.value] if name == "ctpop" else [value.value, ir.Constant(I1, 0)]
+    # declared by hand: llvmlite's declare_intrinsic gives cttz and ctlz one parameter instead of two
+    fullName: str = f"llvm.{name}.i{value.ctype.bits}"
+    if fullName not in compiler.intrinsics:
+        parameterTypes: list[ir.Type] = [irType] if name == "ctpop" else [irType, I1]
+        compiler.intrinsics[fullName] = ir.Function(compiler.module, ir.FunctionType(irType, parameterTypes), name=fullName)
+    intrinsic: ir.Function = compiler.intrinsics[fullName]
+    result: ir.Value = compiler.builder.call(intrinsic, arguments)
+    return TypedValue(result if value.ctype.bits == 32 else compiler.builder.trunc(result, I32), IT)
+
+
+def builtinGcd(compiler: Compiler, node: CallExpression) -> TypedValue | None:
+    # gcd(a, b) and lcm(a, b) on the common integer type, with Euclid's loop; gcd(0, 0) is 0
+    left, right = numericArguments(compiler, node, 2)
+    if not left.ctype.isInteger or not right.ctype.isInteger:
+        compiler.error(f"{node.function.value}() needs integers", node)
+        raise CompileError()
+    ctype: CType = compiler.commonNumericType(left.ctype, right.ctype)
+    builder: ir.IRBuilder = compiler.builder
+    a: ir.Value = compiler.convert(left, ctype, node, "", explicit=True)
+    b: ir.Value = compiler.convert(right, ctype, node, "", explicit=True)
+    if ctype.signed:
+        a = builder.select(builder.icmp_signed("<", a, ir.Constant(ctype.irType, 0)), builder.neg(a), a)
+        b = builder.select(builder.icmp_signed("<", b, ir.Constant(ctype.irType, 0)), builder.neg(b), b)
+
+    x: ir.Value = compiler.allocate(ctype.irType, "gcd_a")
+    y: ir.Value = compiler.allocate(ctype.irType, "gcd_b")
+    builder.store(a, x)
+    builder.store(b, y)
+    function: ir.Function = builder.function
+    conditionBlock: ir.Block = function.append_basic_block("gcd_condition")
+    bodyBlock: ir.Block = function.append_basic_block("gcd_body")
+    endBlock: ir.Block = function.append_basic_block("gcd_end")
+    builder.branch(conditionBlock)
+    builder.position_at_end(conditionBlock)
+    builder.cbranch(builder.icmp_unsigned("!=", builder.load(y), ir.Constant(ctype.irType, 0)), bodyBlock, endBlock)
+    builder.position_at_end(bodyBlock)
+    remainder: ir.Value = builder.urem(builder.load(x), builder.load(y))
+    builder.store(builder.load(y), x)
+    builder.store(remainder, y)
+    builder.branch(conditionBlock)
+    builder.position_at_end(endBlock)
+    divisor: ir.Value = builder.load(x)
+
+    if node.function.value == "gcd":
+        return TypedValue(divisor, ctype)
+    # lcm(a, b) = a / gcd * b, and 0 when either is 0
+    isZero: ir.Value = builder.icmp_unsigned("==", divisor, ir.Constant(ctype.irType, 0))
+    safeDivisor: ir.Value = builder.select(isZero, ir.Constant(ctype.irType, 1), divisor)
+    return TypedValue(builder.mul(builder.udiv(a, safeDivisor), b), ctype)
+
+
 def guardedBuiltin(function: callable) -> callable:
     def run(compiler: Compiler, node: CallExpression) -> TypedValue | None:
         try:
@@ -2324,6 +2783,11 @@ def builtinSwap(compiler: Compiler, node: CallExpression) -> TypedValue | None:
 
 BUILTINS: dict[str, callable] = {
     "swap": guardedBuiltin(builtinSwap),
+    "pc": guardedBuiltin(builtinBitCount),
+    "ctz": guardedBuiltin(builtinBitCount),
+    "clz": guardedBuiltin(builtinBitCount),
+    "gcd": guardedBuiltin(builtinGcd),
+    "lcm": guardedBuiltin(builtinGcd),
     "min": guardedBuiltin(builtinMinMax),
     "max": guardedBuiltin(builtinMinMax),
     "abs": guardedBuiltin(builtinAbs),
@@ -2578,11 +3042,11 @@ def vecReverse(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue
 
 
 def stringSize(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
-    return TypedValue(compiler.callRuntime("cpl_str_len", [target.value]), LL)
+    return TypedValue(compiler.stringLength(target.value), LL)
 
 
 def stringEmpty(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
-    length: ir.Value = compiler.callRuntime("cpl_str_len", [target.value])
+    length: ir.Value = compiler.stringLength(target.value)
     return TypedValue(compiler.builder.icmp_signed("==", length, ir.Constant(I64, 0)), BO)
 
 

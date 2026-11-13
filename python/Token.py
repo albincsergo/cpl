@@ -73,6 +73,7 @@ class TokenType(Enum):
     RBRACKET = "]"
     INPUT = "@"
     OUTPUT = "@@"
+    QUESTION = "?"
 
     # keywords
     SHALL = "shall"
@@ -146,8 +147,6 @@ KEYWORDS: dict[str, TokenType] = {
 ALTERNATIVE_KEYWORDS: dict[str, TokenType] = {
     "eq": TokenType.EQUALS,
     "_": TokenType.SHALL,
-    "f": TokenType.FUNC,
-    "r": TokenType.RET,
     "els": TokenType.ELSE,
     "wh": TokenType.WHILE,
     "brk": TokenType.BREAK,
@@ -168,6 +167,12 @@ TYPE_KEYWORDS: list[str] = [
     "vec", "arr", "map",
     "pr", "pq", "minpq",
 ]
+
+
+# 'f' and 'r' are also the most common variable names in competitive programming (l and r!), so the
+# lexer gives them to the parser as identifiers and the parser decides from context: see
+# CONTEXTUAL_KEYWORDS in Parser.py
+CONTEXTUAL_KEYWORDS: dict[str, TokenType] = {"f": TokenType.FUNC, "r": TokenType.RET}
 
 
 def lookupIdentifier(identifier: str) -> TokenType:

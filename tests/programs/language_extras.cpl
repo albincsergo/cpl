@@ -1,0 +1,43 @@
+// the ternary, r and f as ordinary names, bit builtins, gcd/lcm, and loops the compiler versions
+f sign(x: it) -> st { r x < 0 ? "minus" : x == 0 ? "zero" : "plus". }
+
+f sum(l: it, r: it) -> ll {
+    _ f: vec<ll> = vec<ll>(r + 1).
+    for (i in rng(l, r + 1)) { f[i] = i. }
+    _ total: ll.
+    for (i in rng(l, r + 1)) { total += f[i]. }
+    r total.
+}
+
+f mn() {
+    _ a: it = 5.
+    _ b: ll = a > 3 ? a * 2 : ll(1) << 40.
+    ou @@ b @@ ' ' @@ (a > 9 ? 1 : 2,5) @@ ' ' @@ sign(-3) @@ sign(0) @@ sign(7) @@ ' ' @@ (true ? 1 : 1 / 0) @@ el.
+
+    _ l, r: it = 2.
+    r += 3.
+    r++.
+    ou @@ sum(l, r) @@ ' ' @@ r @@ el.
+
+    ou @@ pc(255) @@ ' ' @@ pc(ll(1) << 40) @@ ' ' @@ ctz(48) @@ ' ' @@ clz(1) @@ ' ' @@ gcd(-12, 18) @@ ' ' @@ gcd(0, 0) @@ ' ' @@ lcm(4, 6) @@ el.
+
+    // a branch-free if inside a versioned loop must keep the same meaning as the plain one
+    _ v: vec<it> = vec<it>(10).
+    for (i in rng(10)) { v[i] = (i * 7) % 10. }
+    _ best: vec<it> = vec<it>(10).
+    for (i in rng(1, 10)) {
+        if v[i] > v[i - 1] { best[i] = v[i]. } else { best[i] = v[i - 1] * 100. }
+    }
+    _ kept: it = 0.
+    for (i in rng(10)) {
+        if v[i] % 2 == 0 { kept = v[i]. }
+    }
+    ou @@ best @@ ' ' @@ kept @@ el.
+
+    // descending loops, loops that run zero times, and an index range that starts in the middle
+    _ total: ll.
+    for (i in rng(9, -1, -1)) { total += v[i]. }
+    for (i in rng(5, 5)) { total += v[100]. }
+    for (i in rng(3, 7)) { total += v[i + 3] - v[i - 3]. }
+    ou @@ total @@ el.
+}

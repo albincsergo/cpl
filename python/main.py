@@ -75,7 +75,8 @@ def main(arguments: list[str]) -> int:
             case "check":
                 return 0
             case "ir":
-                print(optimize(module, options.optLevel) if options.optLevel > 0 else module)
+                # the program's own code, without the runtime that gets linked in when it's built
+                print(optimize(module, options.optLevel, linkRuntime=False) if options.optLevel > 0 else module)
                 return 0
             case "build":
                 output: Path = options.output or Path(options.file.stem)

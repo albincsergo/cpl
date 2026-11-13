@@ -1,5 +1,5 @@
 from Lexer import Lexer
-from Token import TokenType, Token
+from Token import TokenType, Token, CONTEXTUAL_KEYWORDS
 from enum import Enum, auto
 
 from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement
@@ -7,12 +7,13 @@ from AST import IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStat
 from AST import IfStatement, BooleanLiteral, StringLiteral, CharLiteral, NilLiteral, PrefixExpression, CallExpression
 from AST import IndexExpression, MemberExpression, CastExpression, WhileStatement, ForStatement, BreakStatement
 from AST import ContinueStatement, InputStatement, OutputStatement, StructStatement, TypeExpression, Node
-from AST import ForEachStatement
+from AST import ForEachStatement, ConditionalExpression
 
 
 # precedence types
 class PrecedenceType(Enum):
     P_LOWEST = 0
+    P_TERNARY = auto()
     P_OR = auto()
     P_AND = auto()
     P_BITOR = auto()
@@ -30,6 +31,7 @@ class PrecedenceType(Enum):
 
 # precedence table
 PRECEDENCES: dict[TokenType, PrecedenceType] = {
+    TokenType.QUESTION: PrecedenceType.P_TERNARY,
     TokenType.OR: PrecedenceType.P_OR,
     TokenType.AND: PrecedenceType.P_AND,
     TokenType.BITOR: PrecedenceType.P_BITOR,
@@ -116,8 +118,9 @@ class Parser:
         self.infixParseFns: dict[TokenType, callable] = {
             tokenType: self.parseInfixExpression
             for tokenType in PRECEDENCES
-            if tokenType not in [TokenType.LPAREN, TokenType.LBRACKET, TokenType.MEMBER]
+            if tokenType not in [TokenType.LPAREN, TokenType.LBRACKET, TokenType.MEMBER, TokenType.QUESTION]
         }
+        self.infixParseFns[TokenType.QUESTION] = self.parseConditionalExpression
         self.infixParseFns[TokenType.LPAREN] = self.parseCallExpression
         self.infixParseFns[TokenType.LBRACKET] = self.parseIndexExpression
         self.infixParseFns[TokenType.MEMBER] = self.parseMemberExpression
@@ -225,6 +228,11 @@ class Parser:
         token: Token = self.currentToken
         statement: Statement | None
 
+        keyword: TokenType | None = self.contextualKeyword()
+        if keyword is not None:
+            self.currentToken = Token(keyword, token.literal, token.lineNumber, token.position)
+            token = self.currentToken
+
         match token.type:
             case TokenType.FUNC:
                 statement = self.parseFunctionStatement()
@@ -252,6 +260,19 @@ class Parser:
                 statement = self.parseSimpleStatement(terminated=True)
 
         return self.at(statement, token)
+
+    def contextualKeyword(self) -> TokenType | None:
+        # at the start of a statement, 'r' returns and 'f' defines a function, unless they're clearly
+        # used as variables: r = 1.  r += x.  r[i] = 0.  r.x = 5.  r++.
+        token: Token = self.currentToken
+        if token.type != TokenType.IDENTIFIER or token.literal not in CONTEXTUAL_KEYWORDS:
+            return None
+        if token.literal == "f":
+            return TokenType.FUNC if self.peekTokenIs(TokenType.IDENTIFIER) else None
+        variableUse: set[TokenType] = set(ASSIGN_OPERATORS) | {
+            TokenType.LBRACKET, TokenType.MEMBER, TokenType.INCREMENT, TokenType.DECREMENT,
+        }
+        return None if self.peekToken.type in variableUse else TokenType.RET
 
     def parseSimpleStatement(self, terminated: bool) -> Statement | None:
         # declarations, assignments, ++/-- and expression statements: the things allowed in a for header
@@ -691,6 +712,19 @@ class Parser:
             return None
 
         return infixExpression
+
+    def parseConditionalExpression(self, condition: Expression) -> Expression | None:
+        # a ? b : c, right-associative so that a ? b : c ? d : e works like in C
+        expression: ConditionalExpression = ConditionalExpression(condition)
+        self.nextToken()
+        expression.consequence = self.parseExpression(PrecedenceType.P_LOWEST)
+        if expression.consequence is None or not self.expectPeek(TokenType.COLON):
+            return None
+        self.nextToken()
+        expression.alternative = self.parseExpression(PrecedenceType.P_LOWEST)
+        if expression.alternative is None:
+            return None
+        return expression
 
     def parsePrefixExpression(self) -> Expression | None:
         prefixExpression: PrefixExpression = PrefixExpression(operator=self.currentToken.literal)

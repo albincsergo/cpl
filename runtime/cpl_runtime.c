@@ -29,6 +29,17 @@
 // key kinds shared by maps and sorting
 enum { KIND_SIGNED = 0, KIND_UNSIGNED = 1, KIND_DOUBLE = 2, KIND_STRING = 3 };
 
+// The compiler links this file into every program as LLVM bitcode (when clang is available), so the
+// small functions that run per value - reading a number, printing one, indexing a string - are
+// forced inline into the program's loops, while their rare slow paths stay out of line.
+#ifdef __clang__
+#define HOT __attribute__((always_inline))
+#else
+#define HOT
+#endif
+#define COLD __attribute__((noinline, cold))
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+
 // region output
 static char outBuffer[1 << 20];
 static size_t outLength = 0;
@@ -50,51 +61,54 @@ void cpl_flush(void) {
     outLength = 0;
 }
 
-static void outWrite(const char *data, size_t length) {
-    if (outLength + length > sizeof(outBuffer)) {
-        cpl_flush();
-        if (length > sizeof(outBuffer)) {
-            writeAll(1, data, length);
-            return;
-        }
+static COLD void outWriteSlow(const char *data, size_t length) {
+    cpl_flush();
+    if (length > sizeof(outBuffer)) {
+        writeAll(1, data, length);
+        return;
     }
-    memcpy(outBuffer + outLength, data, length);
-    outLength += length;
+    memcpy(outBuffer, data, length);
+    outLength = length;
 }
 
-static void outChar(char c) {
-    if (outLength == sizeof(outBuffer)) cpl_flush();
+static inline void outWrite(const char *data, size_t length) {
+    if (LIKELY(outLength + length <= sizeof(outBuffer))) {
+        memcpy(outBuffer + outLength, data, length);
+        outLength += length;
+        return;
+    }
+    outWriteSlow(data, length);
+}
+
+static inline void outChar(char c) {
+    if (__builtin_expect(outLength == sizeof(outBuffer), 0)) cpl_flush();
     outBuffer[outLength++] = c;
 }
 
-static int formatUnsigned(uint64_t value, char *buffer) {
+// writes the digits straight into the output buffer, back to front
+static inline void writeUnsigned(uint64_t value) {
+    if (__builtin_expect(outLength + 24 > sizeof(outBuffer), 0)) cpl_flush();
     char digits[24];
     int count = 0;
     do {
         digits[count++] = (char)('0' + value % 10);
         value /= 10;
     } while (value > 0);
-
-    for (int i = 0; i < count; i++) buffer[i] = digits[count - 1 - i];
-    return count;
+    char *out = outBuffer + outLength;
+    for (int i = 0; i < count; i++) out[i] = digits[count - 1 - i];
+    outLength += (size_t)count;
 }
 
-void cpl_print_i64(int64_t value) {
-    char buffer[24];
-    int length = 0;
+HOT void cpl_print_i64(int64_t value) {
     uint64_t magnitude = (uint64_t)value;
     if (value < 0) {
-        buffer[length++] = '-';
+        outChar('-');
         magnitude = 0 - magnitude;
     }
-    length += formatUnsigned(magnitude, buffer + length);
-    outWrite(buffer, (size_t)length);
+    writeUnsigned(magnitude);
 }
 
-void cpl_print_u64(uint64_t value) {
-    char buffer[24];
-    outWrite(buffer, (size_t)formatUnsigned(value, buffer));
-}
+HOT void cpl_print_u64(uint64_t value) { writeUnsigned(value); }
 
 void cpl_print_f64(double value) {
     char buffer[64];
@@ -102,7 +116,7 @@ void cpl_print_f64(double value) {
     outWrite(buffer, (size_t)length);
 }
 
-void cpl_print_char(int8_t c) { outChar((char)c); }
+HOT void cpl_print_char(int8_t c) { outChar((char)c); }
 
 void cpl_print_bool(int8_t value) {
     if (value) outWrite("true", 4);
@@ -251,9 +265,9 @@ static CplStr *strFromBytes(const char *bytes, int64_t length) {
     return s;
 }
 
-int64_t cpl_str_len(CplStr *s) { return strLength(s); }
+HOT int64_t cpl_str_len(CplStr *s) { return strLength(s); }
 
-void cpl_print_str(CplStr *s) {
+HOT void cpl_print_str(CplStr *s) {
     if (s != NULL) outWrite(s->data, (size_t)strLength(s));
 }
 
@@ -306,7 +320,7 @@ int32_t cpl_str_cmp(CplStr *a, CplStr *b) {
     return lengthA < lengthB ? -1 : (lengthA > lengthB ? 1 : 0);
 }
 
-int8_t cpl_str_at(CplStr *s, int64_t index) {
+HOT int8_t cpl_str_at(CplStr *s, int64_t index) {
     int64_t length = strLength(s);
     if (index < 0 || index >= length) cpl_panic_index(index, length);
     return (int8_t)s->data[index];
@@ -395,36 +409,39 @@ static size_t inLength = 0;
 static size_t inPosition = 0;
 static int inEnded = 0;
 
-static int peekChar(void) {
-    if (inPosition == inLength) {
-        if (inEnded) return -1;
-        // like cin being tied to cout: show pending output before blocking on input
-        cpl_flush();
-        ssize_t count;
-        do {
-            count = read(0, inBuffer, sizeof(inBuffer));
-        } while (count < 0 && errno == EINTR);
-        if (count <= 0) {
-            inEnded = 1;
-            return -1;
-        }
-        inLength = (size_t)count;
-        inPosition = 0;
+static COLD int refill(void) {
+    if (inEnded) return -1;
+    // like cin being tied to cout: show pending output before blocking on input
+    cpl_flush();
+    ssize_t count;
+    do {
+        count = read(0, inBuffer, sizeof(inBuffer));
+    } while (count < 0 && errno == EINTR);
+    if (count <= 0) {
+        inEnded = 1;
+        return -1;
     }
-    return (unsigned char)inBuffer[inPosition];
+    inLength = (size_t)count;
+    inPosition = 0;
+    return (unsigned char)inBuffer[0];
 }
 
-static int nextChar(void) {
+static inline int peekChar(void) {
+    if (LIKELY(inPosition < inLength)) return (unsigned char)inBuffer[inPosition];
+    return refill();
+}
+
+static inline int nextChar(void) {
     int c = peekChar();
     if (c >= 0) inPosition++;
     return c;
 }
 
-static int isSpace(int c) {
+static inline int isSpace(int c) {
     return c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\v' || c == '\f';
 }
 
-static void skipSpaces(void) {
+static inline void skipSpaces(void) {
     while (isSpace(peekChar())) inPosition++;
 }
 
@@ -461,27 +478,46 @@ int8_t cpl_eof(void) {
     return peekChar() < 0;
 }
 
-int64_t cpl_read_i64(void) {
+static COLD void badInteger(void) { panic("expected an integer in the input"); }
+
+HOT int64_t cpl_read_i64(void) {
     skipSpaces();
-    if (peekChar() < 0) return 0;
+    int c = peekChar();
+    if (c < 0) return 0;
 
     int negative = 0;
-    if (peekChar() == '-' || peekChar() == '+') negative = nextChar() == '-';
-    if (peekChar() < '0' || peekChar() > '9') panic("expected an integer in the input");
+    if (c == '-' || c == '+') {
+        negative = c == '-';
+        inPosition++;
+        c = peekChar();
+    }
+    if ((unsigned)(c - '0') >= 10) badInteger();
 
     uint64_t value = 0;
-    while (peekChar() >= '0' && peekChar() <= '9') value = value * 10 + (uint64_t)(nextChar() - '0');
+    do {
+        value = value * 10 + (uint64_t)(c - '0');
+        inPosition++;
+        c = peekChar();
+    } while ((unsigned)(c - '0') < 10);
     return negative ? (int64_t)(0 - value) : (int64_t)value;
 }
 
-uint64_t cpl_read_u64(void) {
+HOT uint64_t cpl_read_u64(void) {
     skipSpaces();
-    if (peekChar() < 0) return 0;
-    if (peekChar() == '+') nextChar();
-    if (peekChar() < '0' || peekChar() > '9') panic("expected an unsigned integer in the input");
+    int c = peekChar();
+    if (c < 0) return 0;
+    if (c == '+') {
+        inPosition++;
+        c = peekChar();
+    }
+    if ((unsigned)(c - '0') >= 10) panic("expected an unsigned integer in the input");
 
     uint64_t value = 0;
-    while (peekChar() >= '0' && peekChar() <= '9') value = value * 10 + (uint64_t)(nextChar() - '0');
+    do {
+        value = value * 10 + (uint64_t)(c - '0');
+        inPosition++;
+        c = peekChar();
+    } while ((unsigned)(c - '0') < 10);
     return value;
 }
 
@@ -496,7 +532,7 @@ double cpl_read_f64(void) {
     return value;
 }
 
-int8_t cpl_read_char(void) {
+HOT int8_t cpl_read_char(void) {
     skipSpaces();
     int c = nextChar();
     return c < 0 ? 0 : (int8_t)c;
@@ -765,15 +801,27 @@ typedef struct {
     int64_t size;
     int64_t deleted;
     int32_t kind;
+    // the last key looked up and its entry: m[k] followed by m[k] = ... hashes only once
+    uint64_t lastKey;
+    Entry *lastEntry;
 } CplMap;
 
 static uint64_t hashKey(const CplMap *m, uint64_t key) {
     if (m->kind == KIND_STRING) {
+        // eight bytes at a time, then the tail; the finalizer below mixes the result
         CplStr *s = (CplStr *)(uintptr_t)key;
-        uint64_t hash = 1469598103934665603ULL;
         int64_t length = strLength(s);
-        for (int64_t i = 0; i < length; i++) hash = (hash ^ (uint8_t)s->data[i]) * 1099511628211ULL;
-        key = hash;
+        uint64_t hash = 0x9e3779b97f4a7c15ULL ^ (uint64_t)length;
+        int64_t i = 0;
+        for (; i + 8 <= length; i += 8) {
+            uint64_t word;
+            memcpy(&word, s->data + i, 8);
+            hash = (hash ^ word) * 0xff51afd7ed558ccdULL;
+            hash ^= hash >> 32;
+        }
+        uint64_t tail = 0;
+        if (i < length) memcpy(&tail, s->data + i, (size_t)(length - i));
+        key = (hash ^ tail) * 0xc4ceb9fe1a85ec53ULL;
     }
     // splitmix64 finalizer, so sequential keys don't cluster
     key += 0x9e3779b97f4a7c15ULL;
@@ -818,6 +866,7 @@ static void growMap(CplMap *m) {
     if ((m->size + 1) * 2 > m->capacity) m->capacity *= 2;
     m->entries = arenaAlloc(sizeof(Entry) * (size_t)m->capacity);
     m->deleted = 0;
+    m->lastEntry = NULL;
 
     uint64_t mask = (uint64_t)m->capacity - 1;
     for (int64_t i = 0; i < oldCapacity; i++) {
@@ -831,8 +880,15 @@ static void growMap(CplMap *m) {
 // returns a pointer to the 8 byte value slot, inserting a zeroed one if needed
 char *cpl_map_at(CplMap *m, uint64_t key, int8_t *inserted) {
     key = normalizeKey(m, key);
+    // the same key as last time (for strings: the very same string) needs no hashing at all
+    if (m->lastEntry != NULL && m->lastKey == key) {
+        *inserted = 0;
+        return (char *)&m->lastEntry->value;
+    }
     Entry *entry = findEntry(m, key);
     if (entry != NULL) {
+        m->lastKey = key;
+        m->lastEntry = entry;
         *inserted = 0;
         return (char *)&entry->value;
     }
@@ -848,6 +904,8 @@ char *cpl_map_at(CplMap *m, uint64_t key, int8_t *inserted) {
     m->entries[i].key = key;
     m->entries[i].value = 0;
     m->size++;
+    m->lastKey = key;
+    m->lastEntry = &m->entries[i];
     *inserted = 1;
     return (char *)&m->entries[i].value;
 }
@@ -857,6 +915,7 @@ int8_t cpl_map_has(CplMap *m, uint64_t key) { return findEntry(m, normalizeKey(m
 void cpl_map_del(CplMap *m, uint64_t key) {
     Entry *entry = findEntry(m, normalizeKey(m, key));
     if (entry == NULL) return;
+    if (entry == m->lastEntry) m->lastEntry = NULL;
     entry->state = 2;
     m->size--;
     m->deleted++;
@@ -868,6 +927,7 @@ void cpl_map_clear(CplMap *m) {
     memset(m->entries, 0, sizeof(Entry) * (size_t)m->capacity);
     m->size = 0;
     m->deleted = 0;
+    m->lastEntry = NULL;
 }
 
 // all keys in sorted order, as a vector with elements of elemSize bytes

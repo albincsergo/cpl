@@ -1,1 +1,1 @@
-(line 2): expected identifier but found 'r'; 'r' is a keyword (short for 'ret') and can't be used as a name
+(line 2): expected identifier but found 'in'; 'in' is a keyword and can't be used as a name

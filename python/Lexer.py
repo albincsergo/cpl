@@ -19,7 +19,7 @@ OPERATORS: list[tuple[str, TokenType]] = sorted([
     (",", TokenType.COMMA), (":", TokenType.COLON), ("->", TokenType.ARROW),
     ("(", TokenType.LPAREN), (")", TokenType.RPAREN), ("{", TokenType.LBRACE), ("}", TokenType.RBRACE),
     ("[", TokenType.LBRACKET), ("]", TokenType.RBRACKET),
-    ("@", TokenType.INPUT), ("@@", TokenType.OUTPUT),
+    ("@", TokenType.INPUT), ("@@", TokenType.OUTPUT), ("?", TokenType.QUESTION),
 ], key=lambda operator: -len(operator[0]))
 
 ESCAPES: dict[str, str] = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "\\": "\\", "'": "'", '"': '"'}
