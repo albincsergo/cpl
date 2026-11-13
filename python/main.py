@@ -51,6 +51,11 @@ if __name__ == '__main__':
     compiler: Compiler = Compiler()
     compiler.compile(program)
 
+    if len(compiler.errors) > 0:
+        for error in compiler.errors:
+            print(error)
+        exit(1)
+
     # output
     module: ir.Module = compiler.module
     module.triple = llvm.get_default_triple()
@@ -63,7 +68,11 @@ if __name__ == '__main__':
         print(module)
 
     if RUN_PROGRAM:
-        llvm.initialize()
+        # newer llvmlite versions initialize LLVM automatically and raise if this is called
+        try:
+            llvm.initialize()
+        except RuntimeError:
+            pass
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()
         
@@ -80,6 +89,10 @@ if __name__ == '__main__':
         engine.finalize_object()
 
         entry = engine.get_function_address('mn')
+        if entry == 0:
+            print("~~~ COMPILE ERROR: No entry function 'mn' found.")
+            exit(1)
+
         cfunc = CFUNCTYPE(c_int)(entry)
 
         startTime = time.time()

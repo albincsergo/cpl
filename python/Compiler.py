@@ -11,7 +11,7 @@ class Compiler:
             "int": ir.IntType(32),
             "double": ir.DoubleType()
         }
-    
+
         self.module: ir.Module = ir.Module("main")
 
         self.builder: ir.IRBuilder = ir.IRBuilder()
@@ -20,7 +20,7 @@ class Compiler:
 
         # temporary error implementation
         self.errors: list[str] = []
-    
+
     def compile(self, node: Node) -> None:
         match node.type():
             case NodeType.Program:
@@ -50,17 +50,32 @@ class Compiler:
             self.compile(statement)
 
     def visitExpressionStatement(self, node: ExpressionStatement) -> None:
-        self.compile(node.expression)
+        if self.insideFunction("Expression"):
+            self.compile(node.expression)
 
 
-    def visitInfixExpression(self, node: InfixExpression) -> None:
+    def visitInfixExpression(self, node: InfixExpression) -> tuple[ir.Value, ir.Type] | None:
         operator: str = node.operator
-        leftValue, leftType = self.resolveValue(node.leftNode)
-        rightValue, rightType = self.resolveValue(node.rightNode)
+        left = self.resolveValue(node.leftNode)
+        right = self.resolveValue(node.rightNode)
+        if left is None or right is None:
+            return None
+
+        leftValue, leftType = left
+        rightValue, rightType = right
+
+        # mixing ints and doubles promotes the int side to double
+        if isinstance(leftType, ir.IntType) and isinstance(rightType, ir.DoubleType):
+            leftValue, leftType = self.builder.sitofp(leftValue, rightType), rightType
+        elif isinstance(leftType, ir.DoubleType) and isinstance(rightType, ir.IntType):
+            rightValue, rightType = self.builder.sitofp(rightValue, leftType), leftType
+
+        if operator == "^":
+            return self.power(leftValue, rightValue, leftType)
 
         value = None
         Type = None
-        
+
         if (isinstance(leftType, ir.IntType) and isinstance(rightType, ir.IntType)):
             Type = self.typeMap["int"]
             match operator:
@@ -74,7 +89,7 @@ class Compiler:
                     value = self.builder.sdiv(leftValue, rightValue)
                 case "%":
                     value = self.builder.srem(leftValue, rightValue)
-            
+
         elif (isinstance(leftType, ir.DoubleType) and isinstance(rightType, ir.DoubleType)):
             Type = self.typeMap["double"]
             match operator:
@@ -89,32 +104,54 @@ class Compiler:
                 case "%":
                     value = self.builder.frem(leftValue, rightValue)
 
+        if value is None:
+            self.errors.append(f"~~~ COMPILE ERROR: Operator {operator} isn't supported for types {leftType} and {rightType}.")
+            return None
+
         return value, Type
-    
+
     def visitShallStatement(self, node: ShallStatement) -> None:
         name: str = node.name.value
-        value: Expression = node.value
-        valueType: str = node.valueType
+        declaredType: ir.Type = self.typeMap[node.valueType]
 
-        value, Type = self.resolveValue(node=value)
+        if not self.insideFunction(f"Declaration of {name}"):
+            return
 
-        if self.environment.lookup(name) is None:
-            pointer = self.builder.alloca(Type)
+        if name in self.environment.records:
+            self.errors.append(f"~~~ COMPILE ERROR: Identifier {name} was already declared in this scope.")
+            return
 
-            self.builder.store(value, pointer)
+        resolved = self.resolveValue(node=node.value)
+        if resolved is None:
+            return
 
-            self.environment.define(name, pointer, Type)
-        else: 
-            pointer, _ = self.environment.lookup(name)
-            self.builder.store(value, pointer)
+        value = self.convert(*resolved, declaredType, context=f"declaration of {name}")
+        if value is None:
+            return
+
+        pointer = self.builder.alloca(declaredType)
+        self.builder.store(value, pointer)
+        self.environment.define(name, pointer, declaredType)
 
     def visitBlockStatement(self, node: BlockStatement) -> None:
         for statement in node.statements:
+            if self.builder.block is not None and self.builder.block.is_terminated:
+                self.errors.append("~~~ COMPILE ERROR: Unreachable code after return statement.")
+                return
             self.compile(statement)
 
     def visitReturnStatement(self, node: ReturnStatement) -> None:
-        value: Expression = node.returnValue
-        value, Type = self.resolveValue(value)
+        if not self.insideFunction("Return statement"):
+            return
+
+        resolved = self.resolveValue(node.returnValue)
+        if resolved is None:
+            return
+
+        returnType: ir.Type = self.builder.function.function_type.return_type
+        value = self.convert(*resolved, returnType, context="return statement")
+        if value is None:
+            return
 
         self.builder.ret(value)
 
@@ -141,28 +178,47 @@ class Compiler:
         self.environment = Environment(parent=self.environment)
         self.environment.define(name, func, returnType)
 
+        errorCount: int = len(self.errors)
         self.compile(body)
+
+        # only report a missing return if the body itself compiled cleanly
+        if not self.builder.block.is_terminated and len(self.errors) == errorCount:
+            self.errors.append(f"~~~ COMPILE ERROR: Function {name} doesn't return a value.")
 
         self.environment = previousEnvironment
         self.environment.define(name, func, returnType)
 
         self.builder = previousBuilder
 
-    def visitAssignStatement(self, node: AssignStatement) -> None: 
+    def visitAssignStatement(self, node: AssignStatement) -> None:
         name: str = node.ident.value
-        value: Expression = node.rightValue
 
-        value, Type = self.resolveValue(value)
+        if not self.insideFunction(f"Assignment to {name}"):
+            return
 
-        if self.environment.lookup(name) is None:
+        record = self.environment.lookup(name)
+        if record is None:
             self.errors.append(f"~~~ COMPILE ERROR: Identifier {name} wasn't declared previously.")
-        else:
-            pointer, _ = self.environment.lookup(name)
-            self.builder.store(value, pointer)
+            return
+
+        pointer, Type = record
+        if isinstance(pointer, ir.Function):
+            self.errors.append(f"~~~ COMPILE ERROR: Can't assign to function {name}.")
+            return
+
+        resolved = self.resolveValue(node.rightValue)
+        if resolved is None:
+            return
+
+        value = self.convert(*resolved, Type, context=f"assignment to {name}")
+        if value is None:
+            return
+
+        self.builder.store(value, pointer)
     # endregion
-        
+
     # region helpers
-    def resolveValue(self, node: Expression) -> tuple[ir.Value, ir.Type]:
+    def resolveValue(self, node: Expression) -> tuple[ir.Value, ir.Type] | None:
         match node.type():
             case NodeType.IntegerLiteral:
                 node: IntegerLiteral = node
@@ -174,10 +230,50 @@ class Compiler:
                 return ir.Constant(Type, value), Type
             case NodeType.IdentifierLiteral:
                 node: IdentifierLiteral = node
-                pointer, Type = self.environment.lookup(node.value)
+                record = self.environment.lookup(node.value)
+                if record is None:
+                    self.errors.append(f"~~~ COMPILE ERROR: Identifier {node.value} wasn't declared previously.")
+                    return None
+
+                pointer, Type = record
+                if isinstance(pointer, ir.Function):
+                    self.errors.append(f"~~~ COMPILE ERROR: Function {node.value} can't be used as a value.")
+                    return None
+
                 return self.builder.load(pointer), Type
 
             # expression values
             case NodeType.InfixExpression:
                 return self.visitInfixExpression(node)
+
+        self.errors.append(f"~~~ COMPILE ERROR: Can't compile expression of type {node.type().value}.")
+        return None
+
+    def convert(self, value: ir.Value, fromType: ir.Type, toType: ir.Type, context: str) -> ir.Value | None:
+        if fromType == toType:
+            return value
+
+        if isinstance(fromType, ir.IntType) and isinstance(toType, ir.DoubleType):
+            return self.builder.sitofp(value, toType)
+
+        self.errors.append(f"~~~ COMPILE ERROR: Can't convert {fromType} to {toType} in {context}.")
+        return None
+
+    def power(self, base: ir.Value, exponent: ir.Value, Type: ir.Type) -> tuple[ir.Value, ir.Type]:
+        doubleType: ir.Type = self.typeMap["double"]
+        powFunction = self.module.declare_intrinsic("llvm.pow", [doubleType])
+
+        if isinstance(Type, ir.IntType):
+            base = self.builder.sitofp(base, doubleType)
+            exponent = self.builder.sitofp(exponent, doubleType)
+            result = self.builder.call(powFunction, [base, exponent])
+            return self.builder.fptosi(result, Type), Type
+
+        return self.builder.call(powFunction, [base, exponent]), Type
+
+    def insideFunction(self, what: str) -> bool:
+        if self.builder.block is None:
+            self.errors.append(f"~~~ COMPILE ERROR: {what} must be inside a function.")
+            return False
+        return True
     # endregion
