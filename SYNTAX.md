@@ -82,7 +82,7 @@ Every keyword has a long form and a short form. Use whichever you like.
 | `el`        |            | a newline character, like `endl` |
 | `eq`        |            | another way to write `=` |
 
-The short forms are real keywords, so `f`, `r` and `_` can't be used as variable names. Type names like `it` and `ch` can't be used as names either.
+`f` and `r` are special: they're also the most common names in competitive programming (`l` and `r`!), so they only act as keywords at the start of a statement. `r` returns unless it's clearly a variable (`r = 1.`, `r += x.`, `r[i] = 0.`, `r.x = 5.`, `r++.`), and `f` defines a function only when a name follows. Everywhere else they're ordinary names, so `query(l, r)` and `_ f: vec<ll>.` work. The other short forms, like `_`, `in` and `wh`, are real keywords, and so are type names like `it` and `ch`.
 
 ## Types
 
@@ -156,8 +156,11 @@ From the tightest binding to the loosest:
 | `\|` | bitwise or |
 | `&&` | logical and, short-circuit |
 | `\|\|` | logical or, short-circuit |
+| `c ? a : b` | choose a value |
 
 Because `^` binds tighter than unary minus, `-2 ^ 2` is `-4`.
+
+`c ? a : b` picks `a` when `c` holds and `b` otherwise, and only evaluates the side it picks. It binds looser than `||` and chains to the right like in C: `x < 0 ? "minus" : x == 0 ? "zero" : "plus"`. The two sides need the same type, or two number types, which meet in their common type.
 
 Assignment is a statement, not an expression: `=`, `+=`, `-=`, `*=`, `/=`, `%=`, `^=`, `&=`, `|=`, `^^=`, `<<=`, `>>=`, and `++x`, `x++`, `--x`, `x--`.
 
@@ -393,6 +396,8 @@ Struct variables are references: `_ q: Point = p.` makes `q` and `p` the same po
 | `eof()` | `true` once the input has only whitespace left |
 | `gl()`, `getline()` | the rest of the current input line |
 | `swap(a, b)` | exchanges two variables, elements or fields of the same type |
+| `gcd(a, b)`, `lcm(a, b)` | greatest common divisor and least common multiple of two integers; `gcd(0, 0)` is 0 |
+| `pc(x)`, `ctz(x)`, `clz(x)` | set bits, trailing zero bits and leading zero bits of an integer, like `__builtin_popcount` |
 
 ## Memory and the stack
 
@@ -403,6 +408,15 @@ CPL makes the trade-offs a short-lived program can afford and long-running softw
 - **Big allocations use 2 MB pages** where the OS allows it, which makes random access into big arrays cheaper.
 
 Under an address space limit (`ulimit -v`, which some judges use as the memory limit), the runtime reserves less up front and grows in steps instead, and the stack gets at most a quarter of the limit.
+
+The compiler also works hard on the loops competitive programs live in:
+
+- **Loop versioning.** In a `for (i in rng(a, b))` loop, every `v[i + E]` (where `E` doesn't change in the loop, like `dp[(i - 1) * w + j]` or `best[c - w]`) is checked against the vector's length once, before the loop. If they all fit, a copy of the loop without per-element bounds checks runs; otherwise the normal checked loop runs and reports the bad index. This needs the vector's length to stay fixed during the loop: no `pb`, `pp`, `clr` or `swap`, and no calls to your own functions inside it.
+- **Branch-free `if`.** `if c { x = A. } else { x = B. }` (or without the `else`) compiles to a select instead of a jump when `A` and `B` have no side effects, no division and only indexes proven in bounds.
+- **Constants.** A global number that starts as a literal and is never assigned is a compile-time constant, like `const` in C++, so `% mod` with `_ mod: ll = 998244353.` compiles to a multiplication.
+- **The runtime is part of the program.** When clang is installed, the runtime is linked in as LLVM bitcode, so reading and printing numbers and indexing strings are inlined into the loops that use them.
+
+[bench/README.md](bench/README.md) measures all of this against C++ on real problems.
 
 ## Runtime errors
 
@@ -420,7 +434,8 @@ These stop the program with exit code 1 and a message on stderr. Output printed 
 ## Gotchas
 
 - `f(1,2)` is `f(1.2)`. Put a space after commas.
-- `f`, `r` and `_` are keywords, so `_ r: it.` is a syntax error. The error message says so.
+- `r` at the start of a statement returns: `r (x + 1).` returns `x + 1`, while `r[0] = 1.` and `r = 1.` use a variable called `r`.
+- Hot loops are fastest as `for (i in rng(a, b))`: those are the loops the compiler can take bounds checks out of (see below).
 - A `.` directly followed by a name, with no space in between, is member access (`v.pb(x)`). Any other `.` ends the statement.
 - `1 << 40` is computed in 32 bits. Use `ll(1) << 40`.
 - Memory is never freed, which is great for a program that runs for a second and terrible for a server. See [Memory and the stack](#memory-and-the-stack).

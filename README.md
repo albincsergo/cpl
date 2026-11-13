@@ -24,22 +24,19 @@ See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for 
 
 ## Speed
 
-The same algorithms in CPL and C++ (`g++ -O2`, `std::vector`, `std::string`, `std::unordered_map`), best of 5 runs:
+[bench/](bench) has 17 real AtCoder and Codeforces problems, each solved with the same algorithm in CPL and in C++ (g++ -O2, with the same fast I/O). All three builds are verified against brute force solutions before anything is timed. CPL is faster than or level with C++ on 27 of the 31 max-size tests:
 
-| Benchmark | C++ | CPL |
-|-----------|-----|-----|
-| recursive DFS, depth 10⁶ | crashes (stack overflow) | 45 ms |
-| recursive DFS, depth 10⁷ | crashes (stack overflow) | 406 ms |
-| 4·10⁶ pushes into a `vec<vec<it>>` | 1095 ms | 380 ms |
-| 10⁷ node linked list of structs | 434 ms | 67 ms |
-| 2·10⁶ hash map updates | 453 ms | 243 ms |
-| Dijkstra, n = 2·10⁵, m = 10⁶ (`minpq` vs `priority_queue`) | 803 ms | 596 ms |
-| sort 3·10⁶ pairs, then stable sort by a comparator | 770 ms | 630 ms |
-| Codeforces 2272F, n = 5·10⁵ | 217 ms | 167 ms |
-| prime sieve up to 2·10⁷ | 85 ms | 141 ms |
-| `s += char`, 10⁷ times | 27 ms | 120 ms |
+| Problem | C++ | CPL |
+|---|---|---|
+| SCC, 5·10⁵ vertices, recursion 5·10⁵ deep | 83 ms | 41 ms |
+| Dijkstra with path, 10⁵ edges (long path) | 33 ms | 19 ms |
+| lazy segment tree, 5·10⁵ queries mod 998244353 | 832 ms | 717 ms |
+| suffix array + LCP, 5·10⁵ characters | 64 ms | 57 ms |
+| LCS DP, 3000 × 3000 | 21 ms | 18 ms |
+| NTT convolution, 2²⁰ | 214 ms | 218 ms |
+| 10⁴ test cases with a hash map each | 14 ms | 17 ms |
 
-CPL loses where C++ has a smarter data layout: `vector<bool>` packs 8 flags per byte, and `std::string` appends without allocating anything. Hash maps and strings also use more memory than in C++, since nothing is ever freed.
+The full table, the rules and the reasons behind each difference are in [bench/README.md](bench/README.md). In short, CPL wins by never freeing memory, compiling its runtime into the program, and proving bounds checks away in loops. It loses where C++'s references save a lookup or where freeing memory matters.
 
 ## Setup
 
