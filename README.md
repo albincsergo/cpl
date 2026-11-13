@@ -1,7 +1,7 @@
 # cpl
 CPL is an LLVM-based programming language designed specifically for competitive programming. Okay, actually it is a parody of the way competitive programmers write code.
 
-It's also a complete language. It has 64-bit and unsigned integers, doubles, strings, vectors, hash maps, structs, recursion, loops and fast input/output. Programs compile to native code through LLVM, and they run about as fast as the C++ they're making fun of.
+It's also a complete language. It has 64-bit and unsigned integers, doubles, strings, vectors, hash maps, structs, recursion, loops and fast input/output. Programs compile to native code through LLVM. They often run faster than the C++ they're making fun of, because CPL makes trade-offs that only short-lived programs can afford: memory is never freed, and the stack is gigabytes deep.
 
 ```go
 // read n numbers and print how often each one appears, in order
@@ -22,7 +22,24 @@ f mn() -> it {
 }
 ```
 
-See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for some classic problems: BFS, Dijkstra, knapsack, a prime sieve, binary search and a solution to [Codeforces 2272F](https://codeforces.com/contest/2272/problem/F). On that problem, CPL runs at the same speed as the equivalent C++.
+See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for some classic problems: BFS, Dijkstra, knapsack, a prime sieve, binary search and a solution to [Codeforces 2272F](https://codeforces.com/contest/2272/problem/F).
+
+## Speed
+
+The same algorithms in CPL and C++ (`g++ -O2`, `std::vector`, `std::string`, `std::unordered_map`), best of 5 runs:
+
+| Benchmark | C++ | CPL |
+|-----------|-----|-----|
+| recursive DFS, depth 10⁶ | crashes (stack overflow) | 45 ms |
+| recursive DFS, depth 10⁷ | crashes (stack overflow) | 406 ms |
+| 4·10⁶ pushes into a `vec<vec<it>>` | 1095 ms | 380 ms |
+| 10⁷ node linked list of structs | 434 ms | 67 ms |
+| 2·10⁶ hash map updates | 453 ms | 243 ms |
+| Codeforces 2272F, n = 5·10⁵ | 217 ms | 167 ms |
+| prime sieve up to 2·10⁷ | 85 ms | 141 ms |
+| `s += char`, 10⁷ times | 27 ms | 120 ms |
+
+CPL loses where C++ has a smarter data layout: `vector<bool>` packs 8 flags per byte, and `std::string` appends without allocating anything. Hash maps and strings also use more memory than in C++, since nothing is ever freed.
 
 ## Setup
 

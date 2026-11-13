@@ -39,8 +39,9 @@ f mn() -> it {
 13. [Maps](#maps)
 14. [Structs](#structs)
 15. [Built-in functions](#built-in-functions)
-16. [Runtime errors](#runtime-errors)
-17. [Gotchas](#gotchas)
+16. [Memory and the stack](#memory-and-the-stack)
+17. [Runtime errors](#runtime-errors)
+18. [Gotchas](#gotchas)
 
 ## Program structure
 
@@ -265,11 +266,13 @@ s += "!".
 s.sz()                     // length (ll)
 s.emp()                    // is it empty?
 s[0]                       // a ch; bounds-checked
-s.sub(start, length)       // substring; length is cut off at the end
+s.sub(start, length)       // substring, without copying; length is cut off at the end
 s == "x"   s < t           // comparisons look at the contents
 ```
 
 Strings are immutable, so `s[0] = 'x'` isn't allowed: build a new string instead. Joining a string with a number needs `st(x)`.
+
+Building a string piece by piece with `s += x` or `s = s + x` is linear, like `+=` on a C++ `std::string`. Appending to the newest version of a string writes in place, and every older version keeps its own length, so it never sees the new characters.
 
 ## Vectors and arrays
 
@@ -333,6 +336,16 @@ Struct variables are references: `_ q: Point = p.` makes `q` and `p` the same po
 | `eof()` | `true` once the input has only whitespace left |
 | `gl()`, `getline()` | the rest of the current input line |
 
+## Memory and the stack
+
+CPL makes the trade-offs a short-lived program can afford and long-running software can't:
+
+- **Memory is never freed.** Everything comes from one bump allocator carved out of a huge address space reservation. Allocating is a pointer bump, new memory is already zeroed by the OS, and there's no `malloc` bookkeeping per object. This is why vectors of vectors and structs are several times faster than in C++. When the newest allocation is a vector or string that needs to grow, it grows in place without copying.
+- **The stack is huge.** `mn` runs on a stack of a quarter of the machine's memory (up to 16 GB), so a recursive DFS ten million levels deep just works. Only the part that's used costs memory. A recursion that never stops ends with a stack overflow error instead of a crash.
+- **Big allocations use 2 MB pages** where the OS allows it, which makes random access into big arrays cheaper.
+
+Under an address space limit (`ulimit -v`, which some judges use as the memory limit), the runtime reserves less up front and grows in steps instead, and the stack gets at most a quarter of the limit.
+
 ## Runtime errors
 
 These stop the program with exit code 1 and a message on stderr. Output printed before the error still appears.
@@ -343,6 +356,7 @@ These stop the program with exit code 1 and a message on stderr. Output printed 
 ~~~ RUNTIME ERROR: accessed a field of nil
 ~~~ RUNTIME ERROR: vector is empty
 ~~~ RUNTIME ERROR: expected an integer in the input
+~~~ RUNTIME ERROR: stack overflow (the recursion is too deep, or never stops)
 ```
 
 ## Gotchas
@@ -351,4 +365,4 @@ These stop the program with exit code 1 and a message on stderr. Output printed 
 - `f`, `r` and `_` are keywords, so `_ r: it.` is a syntax error. The error message says so.
 - A `.` directly followed by a name, with no space in between, is member access (`v.pb(x)`). Any other `.` ends the statement.
 - `1 << 40` is computed in 32 bits. Use `ll(1) << 40`.
-- Memory is never freed. That's fine for competitive programming, and part of the parody.
+- Memory is never freed, which is great for a program that runs for a second and terrible for a server. See [Memory and the stack](#memory-and-the-stack).
