@@ -36,12 +36,14 @@ f mn() -> it {
 10. [Input and output](#input-and-output)
 11. [Strings](#strings)
 12. [Vectors and arrays](#vectors-and-arrays)
-13. [Maps](#maps)
-14. [Structs](#structs)
-15. [Built-in functions](#built-in-functions)
-16. [Memory and the stack](#memory-and-the-stack)
-17. [Runtime errors](#runtime-errors)
-18. [Gotchas](#gotchas)
+13. [Pairs](#pairs)
+14. [Maps](#maps)
+15. [Priority queues](#priority-queues)
+16. [Structs](#structs)
+17. [Built-in functions](#built-in-functions)
+18. [Memory and the stack](#memory-and-the-stack)
+19. [Runtime errors](#runtime-errors)
+20. [Gotchas](#gotchas)
 
 ## Program structure
 
@@ -98,9 +100,12 @@ The short forms are real keywords, so `f`, `r` and `_` can't be used as variable
 | `vec<T>`    | | a growable vector of `T` |
 | `arr<T, N>` | | a `vec<T>` that starts with `N` elements |
 | `map<K, V>` | | a hash map from `K` to `V` |
+| `pr<A, B>`  | | a pair of an `A` and a `B` |
+| `pq<T>`     | | a priority queue, largest first |
+| `minpq<T>`  | | a priority queue, smallest first |
 | any struct name | | an instance of that struct |
 
-Numbers, characters, booleans and strings are **values**: assigning or passing them makes a copy, and strings can't be changed in place. Vectors, maps and structs are **references**, as in Java or Python: assigning one or passing it to a function shares the same object.
+Numbers, characters, booleans, strings and pairs are **values**: assigning or passing them makes a copy, and strings can't be changed in place. Vectors, maps, priority queues and structs are **references**, as in Java or Python: assigning one or passing it to a function shares the same object.
 
 ## Literals
 
@@ -207,9 +212,20 @@ wh i < n { i++. }
 for (_ i: it = 0. i < n. ++i) { ... }
 for (. i < n. ) { ... }       // every part is optional
 for (. . ) { brk. }           // loops forever until brk
+
+for (x in v) { ... }          // every element of a vector
+for (i, x in v) { ... }       // with its index (ll)
+for (c in s) { ... }          // every character of a string
+for (k in m) { ... }          // every key of a map, in sorted order
+for (k, val in m) { ... }     // with its value
+for (i in rng(n)) { ... }     // 0, 1, ..., n - 1
+for (i in rng(a, b)) { ... }  // a, a + 1, ..., b - 1
+for (i in rng(b, a, -1)) { ... }   // b, b - 1, ..., a + 1
 ```
 
 Conditions can be `bo` values or numbers, where 0 is false. Parentheses around conditions are optional. `brk` and `cont` work on the innermost loop, and in a `for` loop `cont` still runs the step.
+
+In a for-each loop, the variables are copies: assigning to `x` doesn't change `v`, but changing a struct through `x` does, since structs are references. The length is checked again on every iteration, so pushing to `v` inside the loop is safe, and a loop over a map goes through the keys it had when the loop started. `rng()` counts like Python's `range` without building a vector.
 
 The compiler reports code after a `r`, `brk` or `cont` as unreachable. It also reports functions that can reach their end without returning a value.
 
@@ -292,10 +308,38 @@ _ g: vec<vec<it>> = vec<vec<it>>(n).   // n separate empty vectors
 | `v.sz()`  | `size`      | number of elements (ll) |
 | `v.emp()` | `empty`     | is it empty? |
 | `v.clr()` | `clear`     | remove everything |
-| `v.srt()` | `sort`      | sort ascending: numbers, characters, booleans or strings |
+| `v.srt()` | `sort`      | sort ascending: numbers, characters, booleans, strings or pairs |
+| `v.srt(before)` | `sort`  | sort by a function, see below |
 | `v.rev()` | `reverse`   | reverse in place |
+| `v.lb(x)` | `lower_bound` | in a sorted vector, the index of the first element `>= x` (ll) |
+| `v.ub(x)` | `upper_bound` | in a sorted vector, the index of the first element `> x` (ll) |
 
-Every `v[i]` is bounds-checked, and a bad index stops the program with a runtime error. `vec<T>(n, x)` isn't allowed when `T` is a vector, map or struct, because all elements would share one object. `vec<T>(n)` gives each element its own.
+To sort in another order, or to sort structs, write a function that says whether `a` goes before `b`, and pass its name:
+
+```go
+f byTime(a: Job, b: Job) -> bo { r a.time < b.time. }
+f descending(a: it, b: it) -> bo { r a > b. }
+
+jobs.srt(byTime).
+v.srt(descending).
+```
+
+Sorting is stable: elements that are equal under the order keep their relative order.
+
+`ou @@ v` prints the elements separated by spaces. Every `v[i]` is bounds-checked, and a bad index stops the program with a runtime error. `vec<T>(n, x)` isn't allowed when `T` is a vector, map or struct, because all elements would share one object. `vec<T>(n)` gives each element its own.
+
+## Pairs
+
+```go
+_ p: pr<it, st> = pr(3, "abc").   // pr(a, b) takes its types from a and b
+_ q: pr<ll, ll> = pr(1, 2).       // the halves convert like any other value
+p.f += 10.                        // .f and .s, or .first and .second
+ou @@ p.s @@ q @@ el.             // a pair prints as "1 2"
+in @ q.                           // and reads two values
+if pr(1, 2) < pr(1, 3) { ... }    // compared by the first half, then the second
+```
+
+Pairs can hold numbers, characters, booleans, strings, structs and other pairs. They're values, so `_ r: pr<it, it> = p.` copies `p`. They sort, can be binary searched, and work in priority queues, which covers most uses of `pair` in C++ solutions. A pair can also be a map key when both halves are integers of at most 32 bits, characters or booleans: `map<pr<it, it>, it>` is the usual grid of coordinates.
 
 ## Maps
 
@@ -308,7 +352,20 @@ count.sz()   count.emp()   count.clr()
 _ keys: vec<st> = count.keys().  // every key, sorted
 ```
 
-Keys can be any number type, `ch`, `bo` or `st`. Values can be anything, including vectors, maps and structs, which are created on first use: `groups['a'].pb("apple").` just works. As in C++, *reading* a missing key with `m[k]` inserts it, so use `has` to check without inserting. Aliases: `count` and `contains` for `has`, `erase` for `del`, plus `size`, `empty` and `clear`.
+Keys can be any number type, `ch`, `bo`, `st` or a pair of small integers (see [Pairs](#pairs)). Values can be anything, including vectors, maps and structs, which are created on first use: `groups['a'].pb("apple").` just works. As in C++, *reading* a missing key with `m[k]` inserts it, so use `has` to check without inserting. Aliases: `count` and `contains` for `has`, `erase` for `del`, plus `size`, `empty` and `clear`.
+
+## Priority queues
+
+```go
+_ q: pq<it>.                  // largest first, like C++'s priority_queue
+_ dist: minpq<pr<ll, it>>.    // smallest first: the Dijkstra queue
+q.ps(5).                      // push
+q.tp()                        // the first element, without removing it
+q.pp().                       // remove the first element
+q.sz()   q.emp()   q.clr()
+```
+
+Elements can be anything with an order: numbers, characters, booleans, strings and pairs. Long aliases: `push`, `top`, `pop`, `size`, `empty` and `clear`. `tp()` and `pp()` on an empty queue are runtime errors.
 
 ## Structs
 
@@ -335,6 +392,7 @@ Struct variables are references: `_ q: Point = p.` makes `q` and `p` the same po
 | `prec(x, digits)` | `x` formatted with a fixed number of decimals, as a `st` |
 | `eof()` | `true` once the input has only whitespace left |
 | `gl()`, `getline()` | the rest of the current input line |
+| `swap(a, b)` | exchanges two variables, elements or fields of the same type |
 
 ## Memory and the stack
 

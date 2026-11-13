@@ -5,20 +5,18 @@ It's also a complete language. It has 64-bit and unsigned integers, doubles, str
 
 ```go
 // read n numbers and print how often each one appears, in order
-f mn() -> it {
+f mn() {
     _ n: it.
     in @ n.
     _ count: map<ll, it>.
-    for (_ i: it = 0. i < n. ++i) {
+    for (i in rng(n)) {
         _ x: ll.
         in @ x.
         count[x]++.
     }
-    _ keys: vec<ll> = count.keys().
-    for (_ i: it = 0. i < keys.sz(). ++i) {
-        ou @@ keys[i] @@ ": " @@ count[keys[i]] @@ el.
+    for (x, times in count) {
+        ou @@ x @@ ": " @@ times @@ el.
     }
-    r 0.
 }
 ```
 
@@ -35,6 +33,8 @@ The same algorithms in CPL and C++ (`g++ -O2`, `std::vector`, `std::string`, `st
 | 4·10⁶ pushes into a `vec<vec<it>>` | 1095 ms | 380 ms |
 | 10⁷ node linked list of structs | 434 ms | 67 ms |
 | 2·10⁶ hash map updates | 453 ms | 243 ms |
+| Dijkstra, n = 2·10⁵, m = 10⁶ (`minpq` vs `priority_queue`) | 803 ms | 596 ms |
+| sort 3·10⁶ pairs, then stable sort by a comparator | 770 ms | 630 ms |
 | Codeforces 2272F, n = 5·10⁵ | 217 ms | 167 ms |
 | prime sieve up to 2·10⁷ | 85 ms | 141 ms |
 | `s += char`, 10⁷ times | 27 ms | 120 ms |
