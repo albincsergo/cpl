@@ -1,0 +1,13 @@
+// 100000 rounds of an 80 KB vector and a map: about 8 GB if nothing were released, which the test
+// runner's 4 GB address space limit wouldn't allow
+f mn() {
+    _ total: ll.
+    for (round in rng(100000)) {
+        _ v: vec<ll> = vec<ll>(10000).
+        _ m: map<it, it>.
+        v[round % 10000] = round.
+        m[round] = 1.
+        total += v[round % 10000] + m.sz().
+    }
+    ou @@ total @@ el.
+}

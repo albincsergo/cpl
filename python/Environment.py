@@ -5,6 +5,9 @@ class Environment:
         self.records: dict[str, tuple[ir.Value, ir.Type]] = records if records else {}
         self.parent: Environment | None = parent
         self.name: str = name
+        # containers declared here that nothing else can reach: (variable, type), released when the
+        # scope ends (see Compiler.releaseScope)
+        self.releasables: list[tuple[ir.Value, object]] = []
 
     def define(self, name: str, value: ir.Value, Type: ir.Type) -> None:
         self.records[name] = (value, Type)

@@ -1,0 +1,19 @@
+// sorts big random vectors of each radix type and checks them against a comparison of neighbours
+_ seed: ull = 7.
+f rnd() -> ull { seed ^^= seed << 13. seed ^^= seed >> 7. seed ^^= seed << 17. r seed. }
+f mn() {
+    _ n: it = 300000.
+    _ a: vec<it>. _ b: vec<ll>. _ c: vec<ui>. _ d: vec<ull>. _ e: vec<du>. _ g: vec<ll>.
+    for (i in rng(n)) {
+        _ x: ull = rnd().
+        a.pb(it(x)). b.pb(ll(x)). c.pb(ui(x >> 7)). d.pb(x). e.pb(du(ll(x % 2000001) - 1000000) / 7). g.pb(ll(x % 1000) - 500).
+    }
+    a.srt(). b.srt(). c.srt(). d.srt(). e.srt(). g.srt().
+    _ ok: bo = true.
+    for (i in rng(1, n)) {
+        if a[i - 1] > a[i] || b[i - 1] > b[i] || c[i - 1] > c[i] || d[i - 1] > d[i] || e[i - 1] > e[i] || g[i - 1] > g[i] { ok = false. }
+    }
+    _ checksum: ll.
+    for (i in rng(0, n, 997)) { checksum = checksum * 31 + a[i] + b[i] % 1000 + ll(c[i] % 1000) + ll(d[i] % 1000) + it(e[i]) + g[i]. }
+    ou @@ ok @@ ' ' @@ checksum @@ el.
+}

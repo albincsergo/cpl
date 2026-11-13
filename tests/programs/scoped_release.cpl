@@ -1,0 +1,61 @@
+// containers that escape must survive their scope; ones that don't are released and their memory reused
+_ kept: vec<vec<it>>.
+_ named: map<it, map<it, it>>.
+
+f build(n: it) -> vec<it> {
+    _ v: vec<it>.
+    for (i in rng(n)) { v.pb(i * i). }
+    r v.
+}
+
+f total(v: vec<it>) -> ll {
+    _ sum: ll.
+    for (x in v) { sum += x. }
+    r sum.
+}
+
+f busy(n: it) -> ll {
+    // released at r, before returning
+    _ scratch: vec<ll> = vec<ll>(n).
+    for (i in rng(n)) { scratch[i] = i. }
+    r scratch[n - 1] * 2.
+}
+
+f mn() {
+    _ checksum: ll.
+    for (round in rng(200)) {
+        _ inner: vec<it>.
+        _ temporary: vec<it> = vec<it>(round + 1, 7).
+        _ counts: map<it, it>.
+        for (i in rng(round % 13)) {
+            inner.pb(round * 100 + i).
+            counts[i % 3]++.
+        }
+        if round % 5 == 0 {
+            kept.pb(inner).
+        }
+        if round % 7 == 0 {
+            _ m: map<it, it>.
+            m[round] = round * 2.
+            named[round] = m.
+        }
+        _ first, second: vec<it>.
+        first.pb(1).
+        second.pb(2).
+        if round % 11 == 0 { swap(first, second). }
+        checksum = checksum * 7 + temporary[round] + counts[1] + first[0] + total(inner) + busy(round + 1).
+        if round % 17 == 3 { cont. }
+        if round == 150 {
+            _ last: vec<it> = build(5).
+            checksum += last[4].
+            brk.
+        }
+    }
+
+    // the escaped containers still hold their values after everything else was reused
+    _ keptTotal: ll.
+    for (v in kept) { keptTotal = keptTotal * 3 + v.sz() + total(v). }
+    _ namedTotal: ll.
+    for (k, m in named) { namedTotal += m[k]. }
+    ou @@ checksum @@ ' ' @@ kept.sz() @@ ' ' @@ keptTotal @@ ' ' @@ named.sz() @@ ' ' @@ namedTotal @@ el.
+}

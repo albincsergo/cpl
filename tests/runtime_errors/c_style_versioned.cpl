@@ -1,0 +1,11 @@
+// C-style counting loops are versioned too; the last one runs past the end and must still be caught
+f mn() {
+    _ v: vec<it> = vec<it>(10).
+    for (_ i: it = 0. i < 10. ++i) { v[i] = i * 3. }
+    _ total: ll.
+    for (_ i: it = 1. i <= 9. i++) { total += v[i] - v[i - 1]. }
+    for (_ i: ll = 9. i >= 0. --i) { total += v[i]. }
+    for (_ j: it = 9. j > 2. j -= 1) { total += v[j - 3]. }
+    ou @@ total @@ el.
+    for (_ i: it = 5. i <= 10. ++i) { ou @@ v[i] @@ ' '. }
+}

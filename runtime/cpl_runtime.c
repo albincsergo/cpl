@@ -200,12 +200,67 @@ static void newChunk(size_t needed) {
     arenaEnd = (char *)memory + size;
 }
 
+// Blocks given back (see arenaRelease) wait in free lists by size class: class c holds blocks of
+// 2^c up to 2^(c+1) bytes, each remembering its size. A request first takes any block from the next
+// class up (which always fits), then looks for a big enough block in its own class. Most memory is
+// never given back, but the compiler releases containers that can't be reached anymore at the end of
+// their scope, and vectors and maps give back the buffers they outgrow.
+#define SIZE_CLASSES 48
+#define MIN_FREE_BLOCK 16
+
+typedef struct FreeBlock {
+    struct FreeBlock *next;
+    size_t size;
+} FreeBlock;
+
+static FreeBlock *freeBlocks[SIZE_CLASSES];
+
+static int floorLog2(size_t size) { return 63 - __builtin_clzll((unsigned long long)size); }
+
+static void *takeFreeBlock(size_t size) {
+    int sizeClass = floorLog2(size);
+    if (sizeClass + 1 < SIZE_CLASSES && freeBlocks[sizeClass + 1] != NULL) {
+        FreeBlock *block = freeBlocks[sizeClass + 1];
+        freeBlocks[sizeClass + 1] = block->next;
+        return block;
+    }
+    // a few tries in the request's own class; same-size blocks (the usual case) come first
+    FreeBlock **link = &freeBlocks[sizeClass];
+    for (int tries = 0; *link != NULL && tries < 8; tries++, link = &(*link)->next) {
+        if ((*link)->size >= size) {
+            FreeBlock *block = *link;
+            *link = block->next;
+            return block;
+        }
+    }
+    return NULL;
+}
+
 static void *arenaAlloc(size_t size) {
     size = alignUp(size > 0 ? size : 1);
+    if (size >= MIN_FREE_BLOCK) {
+        void *block = takeFreeBlock(size);
+        if (block != NULL) {
+            // everything from the arena starts out zeroed, reused blocks too
+            memset(block, 0, size);
+            return block;
+        }
+    }
     if ((size_t)(arenaEnd - arenaTop) < size) newChunk(size);
     void *memory = arenaTop;
     arenaTop += size;
     return memory;
+}
+
+// gives back a block of at least size bytes for reuse
+static void arenaRelease(void *memory, size_t size) {
+    if (memory == NULL || size < MIN_FREE_BLOCK) return;
+    int sizeClass = floorLog2(size);
+    if (sizeClass >= SIZE_CLASSES) return;
+    FreeBlock *block = memory;
+    block->size = size;
+    block->next = freeBlocks[sizeClass];
+    freeBlocks[sizeClass] = block;
 }
 
 // grows the newest allocation in place, if `end` is where it currently ends
@@ -681,8 +736,76 @@ DEFINE_SORT(sortU32, uint32_t)
 DEFINE_SORT(sortU64, uint64_t)
 DEFINE_SORT(sortF64, double)
 
+// LSD radix sort on 8-bit digits for 4 and 8 byte numbers. Keys are mapped to unsigned integers that
+// sort the same way (signed: flip the sign bit; doubles: flip everything for negatives, the sign bit
+// otherwise), and digits that are the same for every key are skipped, so numbers below 2^30 stored
+// in an ll only take 4 passes.
+static uint64_t radixKey(const char *element, int64_t size, int32_t kind) {
+    uint64_t key;
+    if (size == 4) {
+        uint32_t word;
+        memcpy(&word, element, 4);
+        if (kind == KIND_SIGNED) word ^= 0x80000000u;
+        return word;
+    }
+    memcpy(&key, element, 8);
+    if (kind == KIND_SIGNED) return key ^ 0x8000000000000000ULL;
+    if (kind == KIND_DOUBLE) return (key >> 63) ? ~key : key | 0x8000000000000000ULL;
+    return key;
+}
+
+static void radixSort(char *data, int64_t count, int64_t size, int32_t kind) {
+    char *scratch = malloc((size_t)(count * size));
+    if (scratch == NULL) panic("out of memory");
+    int digits = (int)size;
+    int64_t (*histogram)[256] = calloc((size_t)digits, sizeof(*histogram));
+    if (histogram == NULL) panic("out of memory");
+
+    for (int64_t i = 0; i < count; i++) {
+        uint64_t key = radixKey(data + i * size, size, kind);
+        for (int d = 0; d < digits; d++) histogram[d][(key >> (8 * d)) & 255]++;
+    }
+
+    char *from = data, *to = scratch;
+    for (int d = 0; d < digits; d++) {
+        int64_t *bucket = histogram[d];
+        // every key has the same digit here: this pass would change nothing
+        int64_t first = (int64_t)((radixKey(from, size, kind) >> (8 * d)) & 255);
+        if (bucket[first] == count) continue;
+
+        int64_t position = 0;
+        for (int b = 0; b < 256; b++) {
+            int64_t start = position;
+            position += bucket[b];
+            bucket[b] = start;
+        }
+        for (int64_t i = 0; i < count; i++) {
+            uint64_t key = radixKey(from + i * size, size, kind);
+            memcpy(to + bucket[(key >> (8 * d)) & 255]++ * size, from + i * size, (size_t)size);
+        }
+        char *swap = from;
+        from = to;
+        to = swap;
+    }
+    if (from != data) memcpy(data, from, (size_t)(count * size));
+    free(histogram);
+    free(scratch);
+}
+
 static void sortRaw(char *data, int64_t count, int64_t elemSize, int32_t kind) {
     if (count < 2) return;
+    // radix sort wins over comparison sorts from a few hundred elements on
+    int radixable = (elemSize == 4 && kind != KIND_DOUBLE && kind != KIND_STRING) || (elemSize == 8 && kind != KIND_STRING);
+    if (radixable && count >= 256) {
+        int hasNaN = 0;
+        if (kind == KIND_DOUBLE) {
+            for (int64_t i = 0; i < count && !hasNaN; i++) hasNaN = isnan(((double *)data)[i]);
+        }
+        if (!hasNaN) {
+            radixSort(data, count, elemSize, kind);
+            return;
+        }
+    }
     if (kind == KIND_SIGNED && elemSize == 4) {
         sortI32((int32_t *)data, count);
         return;
@@ -747,8 +870,17 @@ void cpl_vec_grow(CplVec *v) {
 
     char *data = arenaAlloc(newBytes);
     if (v->len) memcpy(data, v->data, (size_t)(v->len * v->elemSize));
+    // nothing can point into the old buffer between statements, so it can be reused
+    arenaRelease(v->data, oldBytes);
     v->data = data;
     v->cap = capacity;
+}
+
+// called by the compiler at the end of the scope of a vector that can't be reached anymore; only the
+// vector itself goes, elements that are containers stay (something else may still use them)
+void cpl_vec_release(CplVec *v) {
+    arenaRelease(v->data, alignUp((size_t)(v->cap * v->elemSize)));
+    arenaRelease(v, sizeof(CplVec));
 }
 
 // appends an element and returns a pointer to it (the element may hold old data after a pop)
@@ -875,6 +1007,12 @@ static void growMap(CplMap *m) {
         while (m->entries[j].state != 0) j = (j + 1) & mask;
         m->entries[j] = old[i];
     }
+    arenaRelease(old, sizeof(Entry) * (size_t)oldCapacity);
+}
+
+void cpl_map_release(CplMap *m) {
+    arenaRelease(m->entries, sizeof(Entry) * (size_t)m->capacity);
+    arenaRelease(m, sizeof(CplMap));
 }
 
 // returns a pointer to the 8 byte value slot, inserting a zeroed one if needed

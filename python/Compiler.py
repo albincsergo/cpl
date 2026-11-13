@@ -73,10 +73,12 @@ class FunctionInfo:
 
 
 class LoopContext:
-    def __init__(self, breakBlock: ir.Block, continueBlock: ir.Block) -> None:
+    def __init__(self, breakBlock: ir.Block, continueBlock: ir.Block, environment: Environment) -> None:
         self.breakBlock = breakBlock
         self.continueBlock = continueBlock
         self.hasBreak: bool = False
+        # the scope around the loop body: brk and cont leave every scope inside it
+        self.environment = environment
 
 
 class CompileError(Exception):
@@ -123,6 +125,8 @@ class Compiler:
         self.invariantNode: ir.Value | None = None
         self.pointerTags: dict[ir.Value, str] = {}
         self.mapSlotCount: int = 0
+        # (statement being compiled, the statements after it in its block)
+        self.followingStatements: tuple | None = None
         # > 0 while compiling the expression inside v[...]
         self.indexDepth: int = 0
         # index expressions proven in bounds by loop versioning (see rangeLoop)
@@ -432,6 +436,7 @@ class Compiler:
 
         if not self.currentBlockTerminated():
             if info.returnType.kind == "void":
+                self.releaseScope(self.environment)
                 self.builder.ret_void()
             elif info.name == "mn" and info.returnType.isInteger:
                 # like main in C++, falling off the end of mn means success
@@ -472,6 +477,7 @@ class Compiler:
             "cpl_vec_new": (vec, [I64, I64]), "cpl_vec_grow": (VOID, [vec]), "cpl_vec_pop": (VOID, [vec]),
             "cpl_vec_clear": (VOID, [vec]), "cpl_vec_sort": (VOID, [vec, I32]), "cpl_vec_reverse": (VOID, [vec]),
             "cpl_temp_alloc": (BYTE_POINTER, [I64]), "cpl_temp_free": (VOID, [BYTE_POINTER]),
+            "cpl_vec_release": (VOID, [vec]), "cpl_map_release": (VOID, [BYTE_POINTER]),
             "cpl_map_new": (BYTE_POINTER, [I32]), "cpl_map_at": (BYTE_POINTER, [BYTE_POINTER, I64, I8.as_pointer()]),
             "cpl_map_has": (I8, [BYTE_POINTER, I64]), "cpl_map_del": (VOID, [BYTE_POINTER, I64]),
             "cpl_map_size": (I64, [BYTE_POINTER]), "cpl_map_keys": (vec, [BYTE_POINTER, I64]),
@@ -659,11 +665,27 @@ class Compiler:
 
     # region statements
     def visitStatements(self, statements: list[Statement]) -> None:
-        for statement in statements:
+        for index, statement in enumerate(statements):
             if self.currentBlockTerminated():
                 self.error("unreachable code: this comes after a return, break or continue", statement)
                 return
+            # declarations look at the rest of their block to decide whether a container escapes
+            previous = self.followingStatements
+            self.followingStatements = (statement, statements[index + 1:])
             self.visitStatement(statement)
+            self.followingStatements = previous
+
+    def releaseScope(self, environment: Environment) -> None:
+        for pointer, ctype in reversed(environment.releasables):
+            value: ir.Value = self.builder.load(pointer)
+            self.callRuntime("cpl_map_release" if ctype.kind == "map" else "cpl_vec_release", [value])
+
+    def releaseUntil(self, stop: Environment) -> None:
+        # releases every scope from the current one out to (not including) stop
+        environment: Environment | None = self.environment
+        while environment is not None and environment is not stop:
+            self.releaseScope(environment)
+            environment = environment.parent
 
     def visitStatement(self, node: Statement) -> None:
         match node.type():
@@ -701,6 +723,8 @@ class Compiler:
         previousEnvironment: Environment = self.environment
         self.environment = Environment(parent=previousEnvironment, name="block")
         self.visitStatements(node.statements)
+        if not self.currentBlockTerminated():
+            self.releaseScope(self.environment)
         self.environment = previousEnvironment
 
     def visitExpressionStatement(self, node: ExpressionStatement) -> None:
@@ -744,9 +768,23 @@ class Compiler:
                 self.withTag(pointer, f"global {name}")
             else:
                 pointer = self.allocate(valueType.irType, name)
+                if self.isReleasable(node, name, valueType):
+                    self.environment.releasables.append((pointer, valueType))
 
             self.builder.store(value, pointer)
             self.environment.define(name, pointer, valueType)
+
+    def isReleasable(self, node: ShallStatement, name: str, ctype: CType) -> bool:
+        # a fresh vec, map or pq that only this variable ever refers to can be released when its scope
+        # ends; it is fresh when there's no initializer or the initializer builds a new one
+        if ctype.kind not in ["vec", "map", "pq"] or self.followingStatements is None:
+            return False
+        statement, rest = self.followingStatements
+        if statement is not node:
+            return False
+        if node.value is not None and node.value.type() != NodeType.CastExpression:
+            return False
+        return not escapes(name, rest)
 
     def declareConstant(self, name: str, valueType: CType, resolved: TypedValue) -> bool:
         # a global number that starts as a literal and is never assigned anywhere is a constant, so
@@ -806,6 +844,7 @@ class Compiler:
             if returnType.kind != "void":
                 self.error(f"function {self.currentFunction.name} must return a value of type {returnType}", node)
                 return
+            self.releaseUntil(self.globalEnvironment)
             self.builder.ret_void()
             return
 
@@ -821,6 +860,7 @@ class Compiler:
         if value is None:
             return
 
+        self.releaseUntil(self.globalEnvironment)
         self.builder.ret(value)
 
     def visitIfStatement(self, node: IfStatement) -> None:
@@ -939,7 +979,7 @@ class Compiler:
         self.builder.cbranch(condition, bodyBlock, endBlock)
 
         self.builder.position_at_end(bodyBlock)
-        loop: LoopContext = LoopContext(endBlock, conditionBlock)
+        loop: LoopContext = LoopContext(endBlock, conditionBlock, self.environment)
         self.loops.append(loop)
         self.visitScopedBlock(node.body)
         self.loops.pop()
@@ -956,6 +996,87 @@ class Compiler:
         if node.initializer is not None:
             self.visitStatement(node.initializer)
 
+        try:
+            self.versionedForLoop(node)
+        except CompileError:
+            pass
+        self.environment = previousEnvironment
+
+    def versionedForLoop(self, node: ForStatement) -> None:
+        # for (_ i: it = a. i < b. ++i) with a fixed b and an untouched i counts like rng(a, b), so its
+        # v[i + E] indexes can be checked once up front too (see rangeLoop)
+        shape = self.countingShape(node)
+        candidates: list[IndexExpression] = self.uncheckableIndexes(node.body, shape[0]) if shape is not None else []
+        if not candidates:
+            self.emitForLoop(node)
+            return
+
+        name, pointer, ctype, operator = shape
+        start: ir.Value = self.load(pointer)
+        bound: TypedValue | None = self.visitExpression(node.condition.rightNode)
+        if bound is None or not bound.ctype.isInteger:
+            self.emitForLoop(node)
+            return
+        first: ir.Value = self.convert(TypedValue(start, ctype), LL, node, "", explicit=True)
+        limit: ir.Value = self.convert(bound, LL, node, "", explicit=True)
+        one: ir.Constant = ir.Constant(I64, 1)
+        last: ir.Value = {"<": lambda: self.builder.sub(limit, one), ">": lambda: self.builder.add(limit, one)}.get(operator, lambda: limit)()
+        if operator in ["<", "<="]:
+            isEmpty: ir.Value = self.builder.icmp_signed(">", first, last)
+            lowest, highest = first, last
+        else:
+            isEmpty = self.builder.icmp_signed("<", first, last)
+            lowest, highest = last, first
+
+        inBounds: ir.Value = ir.Constant(I1, 1)
+        for candidate in candidates:
+            container: TypedValue = self.visitExpression(candidate.leftNode)
+            length: ir.Value = self.vecLength(container.value) if container.ctype.kind == "vec" else self.stringLength(container.value)
+            self.store(self.builder.trunc(lowest, ctype.irType) if ctype.bits < 64 else lowest, pointer)
+            smallest: ir.Value = self.convert(self.visitIndexValue(candidate.index), LL, candidate, "")
+            self.store(self.builder.trunc(highest, ctype.irType) if ctype.bits < 64 else highest, pointer)
+            largest: ir.Value = self.convert(self.visitIndexValue(candidate.index), LL, candidate, "")
+            fits: ir.Value = self.builder.and_(self.builder.icmp_signed(">=", smallest, ir.Constant(I64, 0)),
+                                               self.builder.icmp_signed("<", largest, length))
+            inBounds = self.builder.and_(inBounds, fits)
+        self.store(start, pointer)
+
+        with self.builder.if_else(self.builder.or_(isEmpty, inBounds)) as (fast, checked):
+            with fast:
+                added: set[int] = {id(candidate) for candidate in candidates} - self.uncheckedIndexes
+                self.uncheckedIndexes |= added
+                self.emitForLoop(node)
+                self.uncheckedIndexes -= added
+            with checked:
+                self.emitForLoop(node)
+
+    def countingShape(self, node: ForStatement) -> tuple | None:
+        # (name, variable, type, comparison) for for (_ i: T = a. i OP b. i +-= 1), or None
+        initializer, condition, step = node.initializer, node.condition, node.step
+        if initializer is None or condition is None or step is None:
+            return None
+        if initializer.type() != NodeType.ShallStatement or len(initializer.names) != 1 or initializer.value is None:
+            return None
+        name: str = initializer.names[0]
+        record = self.environment.records.get(name)
+        if record is None or record[1].kind != "int" or not record[1].signed:
+            return None
+        if condition.type() != NodeType.InfixExpression or condition.operator not in ["<", "<=", ">", ">="]:
+            return None
+        if condition.leftNode.type() != NodeType.IdentifierLiteral or condition.leftNode.value != name:
+            return None
+        if step.type() != NodeType.AssignStatement or step.target.type() != NodeType.IdentifierLiteral or step.target.value != name:
+            return None
+        if step.operator not in ["+", "-"] or step.rightValue.type() != NodeType.IntegerLiteral or step.rightValue.value != 1:
+            return None
+        if (step.operator == "+") != (condition.operator in ["<", "<="]):
+            return None
+        changed: set[str] = assignedNames(node.body) | declaredNames(node.body)
+        if self.loopCoefficient(condition.rightNode, name, changed) != 0:
+            return None
+        return name, record[0], record[1], condition.operator
+
+    def emitForLoop(self, node: ForStatement) -> None:
         function: ir.Function = self.builder.function
         conditionBlock: ir.Block = function.append_basic_block("for_condition")
         bodyBlock: ir.Block = function.append_basic_block("for_body")
@@ -967,14 +1088,13 @@ class Compiler:
         if node.condition is not None:
             condition: ir.Value | None = self.visitCondition(node.condition)
             if condition is None:
-                self.environment = previousEnvironment
-                return
+                raise CompileError()
             self.builder.cbranch(condition, bodyBlock, endBlock)
         else:
             self.builder.branch(bodyBlock)
 
         self.builder.position_at_end(bodyBlock)
-        loop: LoopContext = LoopContext(endBlock, stepBlock)
+        loop: LoopContext = LoopContext(endBlock, stepBlock, self.environment)
         self.loops.append(loop)
         self.visitScopedBlock(node.body)
         self.loops.pop()
@@ -987,7 +1107,6 @@ class Compiler:
         self.builder.branch(conditionBlock)
 
         self.finishLoop(endBlock, loop, node.condition)
-        self.environment = previousEnvironment
 
     def visitForEachStatement(self, node) -> None:
         if len(node.names) == 2 and node.names[0] == node.names[1]:
@@ -1262,7 +1381,7 @@ class Compiler:
 
         self.builder.position_at_end(bodyBlock)
         bodyStart()
-        loop: LoopContext = LoopContext(endBlock, stepBlock)
+        loop: LoopContext = LoopContext(endBlock, stepBlock, self.environment)
         self.loops.append(loop)
         self.visitScopedBlock(body)
         self.loops.pop()
@@ -1297,6 +1416,7 @@ class Compiler:
             return
 
         loop: LoopContext = self.loops[-1]
+        self.releaseUntil(loop.environment)
         if isBreak:
             loop.hasBreak = True
             self.builder.branch(loop.breakBlock)
@@ -2561,6 +2681,33 @@ class Compiler:
         block = self.builder.block
         return block is not None and block.is_terminated
     # endregion
+
+
+def escapes(name: str, statements: list[Statement]) -> bool:
+    # whether a container variable could end up referenced from somewhere else: anything but x[i],
+    # x.method(...), for (e in x) and ou @@ x counts, and so does assigning to x
+    safe: set[int] = set()
+    for node in walk(statements):
+        match node.type():
+            case NodeType.IndexExpression:
+                safe.add(id(node.leftNode))
+            case NodeType.CallExpression:
+                if node.function.type() == NodeType.MemberExpression:
+                    safe.add(id(node.function.leftNode))
+            case NodeType.ForEachStatement:
+                safe.add(id(node.iterable))
+            case NodeType.OutputStatement:
+                safe.update(id(value) for value in node.values)
+
+    for node in walk(statements):
+        match node.type():
+            case NodeType.IdentifierLiteral:
+                if node.value == name and id(node) not in safe:
+                    return True
+            case NodeType.AssignStatement:
+                if node.target.type() == NodeType.IdentifierLiteral and node.target.value == name:
+                    return True
+    return False
 
 
 def walk(value):
