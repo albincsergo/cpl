@@ -91,7 +91,7 @@ def runtimeLibrary(shared: bool) -> Path:
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     temporary: Path = output.with_name(f".{output.name}.{os.getpid()}")
-    command: list[str] = [findCCompiler(), "-O2", "-std=c11", "-D_DEFAULT_SOURCE", "-fPIC"]
+    command: list[str] = [findCCompiler(), "-O2", "-std=gnu11", "-fPIC", "-pthread"]
     command += ["-shared", "-o", str(temporary), str(RUNTIME_SOURCE), "-lm"] if shared else ["-c", "-o", str(temporary), str(RUNTIME_SOURCE)]
 
     result = subprocess.run(command, capture_output=True, text=True)
@@ -124,7 +124,7 @@ def buildExecutable(module: ir.Module, output: Path, optLevel: int) -> None:
         objectPath: Path = Path(directory) / "program.o"
         objectPath.write_bytes(objectCode)
 
-        command: list[str] = [findCCompiler(), str(objectPath), str(runtimeLibrary(shared=False)), "-lm", "-o", str(output)]
+        command: list[str] = [findCCompiler(), str(objectPath), str(runtimeLibrary(shared=False)), "-pthread", "-lm", "-o", str(output)]
         result = subprocess.run(command, capture_output=True, text=True)
         if result.returncode != 0:
             raise CompileFailure([f"~~~ ERROR: linking failed:\n{result.stderr}"])

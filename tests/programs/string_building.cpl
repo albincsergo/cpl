@@ -1,0 +1,15 @@
+// building long strings piece by piece is linear: appends to the newest string happen in place
+f mn() {
+    _ s: st.
+    for (_ i: it = 0. i < 2000000. ++i) { s += ch('a' + i % 26). }
+
+    // a copy taken halfway keeps its own contents while the original keeps growing
+    _ numbers: st.
+    _ half: st.
+    for (_ i: it = 0. i < 100000. ++i) {
+        numbers = numbers + st(i % 10).
+        if i == 49999 { half = numbers. }
+    }
+    _ branch: st = half + "!".
+    ou @@ s.sz() @@ ' ' @@ s[0] @@ s[25] @@ s[1999999] @@ ' ' @@ numbers.sz() @@ ' ' @@ half.sz() @@ ' ' @@ branch.sz() @@ ' ' @@ branch.sub(49995, 6) @@ ' ' @@ numbers.sub(49995, 6) @@ el.
+}

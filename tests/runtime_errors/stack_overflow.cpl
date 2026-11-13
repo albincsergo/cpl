@@ -1,0 +1,9 @@
+f forever(n: ll) -> ll {
+    _ x: ll = forever(n + 1).
+    r x * x + n.
+}
+
+f mn() {
+    ou @@ "starting" @@ el.
+    ou @@ forever(0).
+}

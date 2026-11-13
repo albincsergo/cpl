@@ -107,6 +107,12 @@ class Compiler:
         self.intrinsics: dict[str, ir.Function] = {}
         self.stringConstants: dict[str, ir.Constant] = {}
 
+        # type-based alias analysis: vector headers, vector elements of each type and struct fields
+        # never overlap, and telling LLVM so lets it keep v.len and v.data in registers inside loops
+        self.tbaaRoot = self.module.add_metadata(["cpl alias classes"])
+        self.tbaaTags: dict[str, ir.Value] = {}
+        self.pointerTags: dict[ir.Value, str] = {}
+
         # temporary error collection used by main.py
         self.errors: list[str] = []
 
@@ -183,8 +189,10 @@ class Compiler:
             self.error(f"the entry function mn must return an integer or nothing, not {info.returnType}", info.node)
             return
 
-        main: ir.Function = ir.Function(self.module, ir.FunctionType(I32, []), name="main")
-        builder: ir.IRBuilder = ir.IRBuilder(main.append_basic_block("entry"))
+        # cpl.entry runs the global initializers and mn; main starts it on the runtime's big stack
+        entry: ir.Function = ir.Function(self.module, ir.FunctionType(I32, []), name="cpl.entry")
+        entry.linkage = "internal"
+        builder: ir.IRBuilder = ir.IRBuilder(entry.append_basic_block("entry"))
         builder.call(initFunction, [])
         result = builder.call(info.irFunction, [])
 
@@ -197,9 +205,13 @@ class Compiler:
                 exitCode = builder.zext(result, I32)
             else:
                 exitCode = result
-
-        builder.call(self.runtime("cpl_flush"), [])
         builder.ret(exitCode)
+
+        main: ir.Function = ir.Function(self.module, ir.FunctionType(I32, []), name="main")
+        builder = ir.IRBuilder(main.append_basic_block("entry"))
+        code: ir.Value = builder.call(self.runtime("cpl_start"), [entry])
+        builder.call(self.runtime("cpl_flush"), [])
+        builder.ret(code)
     # endregion
 
     # region declarations
@@ -381,7 +393,7 @@ class Compiler:
         string = BYTE_POINTER
         vec = self.vecPointer
         signatures: dict[str, tuple[ir.Type, list[ir.Type]]] = {
-            "cpl_flush": (VOID, []),
+            "cpl_flush": (VOID, []), "cpl_start": (I32, [ir.FunctionType(I32, []).as_pointer()]),
             "cpl_print_i64": (VOID, [I64]), "cpl_print_u64": (VOID, [I64]), "cpl_print_f64": (VOID, [DOUBLE]),
             "cpl_print_char": (VOID, [I8]), "cpl_print_bool": (VOID, [I8]), "cpl_print_str": (VOID, [string]),
             "cpl_panic_index": (VOID, [I64, I64]), "cpl_panic_div": (VOID, []),
@@ -392,13 +404,14 @@ class Compiler:
             "cpl_read_line": (string, []),
             "cpl_str_len": (I64, [string]), "cpl_str_concat": (string, [string, string]),
             "cpl_str_cmp": (I32, [string, string]), "cpl_str_at": (I8, [string, I64]),
+            "cpl_str_append_char": (string, [string, I8]),
             "cpl_str_sub": (string, [string, I64, I64]), "cpl_str_from_char": (string, [I8]),
             "cpl_str_from_i64": (string, [I64]), "cpl_str_from_u64": (string, [I64]),
             "cpl_str_from_f64": (string, [DOUBLE]), "cpl_str_from_bool": (string, [I8]),
             "cpl_str_prec": (string, [DOUBLE, I64]), "cpl_str_to_i64": (I64, [string]),
             "cpl_str_to_f64": (DOUBLE, [string]),
             "cpl_ipow": (I64, [I64, I64]),
-            "cpl_vec_new": (vec, [I64, I64]), "cpl_vec_push": (BYTE_POINTER, [vec]), "cpl_vec_pop": (VOID, [vec]),
+            "cpl_vec_new": (vec, [I64, I64]), "cpl_vec_grow": (VOID, [vec]), "cpl_vec_pop": (VOID, [vec]),
             "cpl_vec_clear": (VOID, [vec]), "cpl_vec_sort": (VOID, [vec, I32]), "cpl_vec_reverse": (VOID, [vec]),
             "cpl_map_new": (BYTE_POINTER, [I32]), "cpl_map_at": (BYTE_POINTER, [BYTE_POINTER, I64, I8.as_pointer()]),
             "cpl_map_has": (I8, [BYTE_POINTER, I64]), "cpl_map_del": (VOID, [BYTE_POINTER, I64]),
@@ -522,7 +535,7 @@ class Compiler:
         pointer, targetType = target
 
         if node.operator != "=":
-            current: TypedValue = TypedValue(self.builder.load(pointer), targetType)
+            current: TypedValue = TypedValue(self.load(pointer), targetType)
             right = self.binaryOperation(node.operator, current, right, node)
             if right is None:
                 return
@@ -531,7 +544,7 @@ class Compiler:
         if value is None:
             return
 
-        self.builder.store(value, pointer)
+        self.store(value, pointer)
 
     def visitReturnStatement(self, node: ReturnStatement) -> None:
         if self.currentFunction is None:
@@ -714,7 +727,7 @@ class Compiler:
                     self.error(f"can't read a {ctype} from the input; read its elements one by one", targetNode)
                     continue
 
-            self.builder.store(value, pointer)
+            self.store(value, pointer)
 
     def visitOutputStatement(self, node: OutputStatement) -> None:
         for valueNode in node.values:
@@ -802,18 +815,28 @@ class Compiler:
         return TypedValue(ir.Constant(I8, code), CH)
 
     def stringConstant(self, text: str) -> ir.Constant:
-        # a CplStr { len, data[] } baked into the binary
+        # a CplStr { len, data } header and its bytes, baked into the binary
         if text in self.stringConstants:
             return self.stringConstants[text]
+        if text == "":
+            # the empty string is a nil pointer everywhere
+            return ir.Constant(BYTE_POINTER, None)
 
-        data: bytearray = bytearray(text.encode("utf-8")) + b"\0"
-        structType: ir.LiteralStructType = ir.LiteralStructType([I64, ir.ArrayType(I8, len(data))])
-        constant: ir.GlobalVariable = ir.GlobalVariable(self.module, structType, name=f"string.{len(self.stringConstants)}")
-        constant.linkage = "private"
-        constant.global_constant = True
-        constant.initializer = ir.Constant(structType, [ir.Constant(I64, len(data) - 1), ir.Constant(ir.ArrayType(I8, len(data)), data)])
+        number: int = len(self.stringConstants)
+        data: bytearray = bytearray(text.encode("utf-8"))
+        bytesType: ir.ArrayType = ir.ArrayType(I8, len(data))
+        bytesConstant: ir.GlobalVariable = ir.GlobalVariable(self.module, bytesType, name=f"string.{number}.bytes")
+        bytesConstant.linkage = "private"
+        bytesConstant.global_constant = True
+        bytesConstant.initializer = ir.Constant(bytesType, data)
 
-        pointer: ir.Constant = constant.bitcast(BYTE_POINTER)
+        headerType: ir.LiteralStructType = ir.LiteralStructType([I64, BYTE_POINTER])
+        header: ir.GlobalVariable = ir.GlobalVariable(self.module, headerType, name=f"string.{number}")
+        header.linkage = "private"
+        header.global_constant = True
+        header.initializer = ir.Constant(headerType, [ir.Constant(I64, len(data)), bytesConstant.bitcast(BYTE_POINTER)])
+
+        pointer: ir.Constant = header.bitcast(BYTE_POINTER)
         self.stringConstants[text] = pointer
         return pointer
 
@@ -1011,6 +1034,10 @@ class Compiler:
 
         if leftValue is not None and rightValue is not None:
             if operator == "+":
+                if right.ctype.kind == "char":
+                    return TypedValue(self.callRuntime("cpl_str_append_char", [left.value, right.value]), ST)
+                if left.ctype.kind == "char":
+                    leftValue = self.callRuntime("cpl_str_from_char", [left.value])
                 return TypedValue(self.callRuntime("cpl_str_concat", [leftValue, rightValue]), ST)
 
             if operator in COMPARISON_OPERATORS and left.ctype.kind == "string" and right.ctype.kind == "string":
@@ -1024,10 +1051,9 @@ class Compiler:
         return None
 
     def stringOperand(self, operand: TypedValue) -> ir.Value | None:
-        if operand.ctype.kind == "string":
+        # only checks that the operand can take part; characters become strings lazily below
+        if operand.ctype.kind in ["string", "char"]:
             return operand.value
-        if operand.ctype.kind == "char":
-            return self.callRuntime("cpl_str_from_char", [operand.value])
         return None
 
     def commonNumericType(self, leftType: CType, rightType: CType) -> CType:
@@ -1130,7 +1156,7 @@ class Compiler:
             return None
         pointer: ir.Value = self.allocateStruct(ctype, initializeFields=False)
         for index, value in enumerate(values):
-            self.builder.store(value, self.builder.gep(pointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True))
+            self.store(value, self.structField(pointer, ctype, index))
         return TypedValue(pointer, ctype)
 
     def visitMethodCall(self, objectNode: Expression, name: str, arguments: list[Expression], node: CallExpression) -> TypedValue | None:
@@ -1174,12 +1200,18 @@ class Compiler:
     # endregion
 
     # region vectors and maps
+    def vecField(self, vec: ir.Value, index: int) -> ir.Value:
+        return self.withTag(self.builder.gep(vec, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True), "vec header")
+
     def vecLength(self, vec: ir.Value) -> ir.Value:
-        return self.builder.load(self.builder.gep(vec, [ir.Constant(I32, 0), ir.Constant(I32, 0)], inbounds=True))
+        return self.load(self.vecField(vec, 0))
 
     def vecData(self, vec: ir.Value, elem: CType) -> ir.Value:
-        data: ir.Value = self.builder.load(self.builder.gep(vec, [ir.Constant(I32, 0), ir.Constant(I32, 3)], inbounds=True))
+        data: ir.Value = self.load(self.vecField(vec, 3))
         return self.builder.bitcast(data, elem.irType.as_pointer())
+
+    def vecSlot(self, vec: ir.Value, elem: CType, index: ir.Value) -> ir.Value:
+        return self.withTag(self.builder.gep(self.vecData(vec, elem), [index], inbounds=True), self.elementTag(elem))
 
     def vecElementPointer(self, vec: ir.Value, elem: CType, index: ir.Value) -> ir.Value:
         length: ir.Value = self.vecLength(vec)
@@ -1189,7 +1221,7 @@ class Compiler:
             self.callRuntime("cpl_panic_index", [index, length])
             self.builder.unreachable()
 
-        return self.builder.gep(self.vecData(vec, elem), [index], inbounds=True)
+        return self.vecSlot(vec, elem, index)
 
     def mapKey(self, value: ir.Value, ctype: CType) -> ir.Value:
         # every map key travels to the runtime as 64 bits
@@ -1252,8 +1284,7 @@ class Compiler:
 
         self.builder.position_at_end(bodyBlock)
         value: ir.Value = makeValue()
-        slot: ir.Value = self.builder.gep(self.vecData(vec, elem), [index], inbounds=True)
-        self.builder.store(value, slot)
+        self.store(value, self.vecSlot(vec, elem, index))
         self.builder.store(self.builder.add(index, ir.Constant(I64, 1)), counter)
         self.builder.branch(conditionBlock)
 
@@ -1271,8 +1302,7 @@ class Compiler:
         for index, (_, fieldType) in enumerate(info.fields):
             if fieldType.kind in ["vec", "map"]:
                 typeExpression: TypeExpression | None = typeExpressions[index] if index < len(typeExpressions) else None
-                fieldPointer: ir.Value = self.builder.gep(pointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True)
-                self.builder.store(self.defaultValue(fieldType, typeExpression), fieldPointer)
+                self.store(self.defaultValue(fieldType, typeExpression), self.structField(pointer, ctype, index))
         return pointer
 
     def defaultValue(self, ctype: CType, typeExpression: TypeExpression | None = None) -> ir.Value:
@@ -1295,6 +1325,10 @@ class Compiler:
     # endregion
 
     # region indexing and members
+    def structField(self, pointer: ir.Value, ctype: CType, index: int) -> ir.Value:
+        field: ir.Value = self.builder.gep(pointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True)
+        return self.withTag(field, f"struct {ctype.name} field {index}")
+
     def visitIndexExpression(self, node: IndexExpression) -> TypedValue | None:
         container: TypedValue | None = self.visitExpression(node.leftNode)
         if container is None:
@@ -1314,7 +1348,7 @@ class Compiler:
         if address is None:
             return None
         pointer, ctype = address
-        return TypedValue(self.builder.load(pointer), ctype)
+        return TypedValue(self.load(pointer), ctype)
 
     def indexAddress(self, container: TypedValue, node: IndexExpression) -> tuple[ir.Value, CType] | None:
         if container.ctype.kind == "string":
@@ -1345,7 +1379,7 @@ class Compiler:
         if address is None:
             return None
         pointer, ctype = address
-        return TypedValue(self.builder.load(pointer), ctype)
+        return TypedValue(self.load(pointer), ctype)
 
     def memberAddress(self, node: MemberExpression) -> tuple[ir.Value, CType] | None:
         owner: TypedValue | None = self.visitExpression(node.leftNode)
@@ -1371,8 +1405,7 @@ class Compiler:
             self.callRuntime("cpl_panic_nil", [])
             self.builder.unreachable()
 
-        pointer: ir.Value = self.builder.gep(owner.value, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True)
-        return pointer, info.fields[index][1]
+        return self.structField(owner.value, owner.ctype, index), info.fields[index][1]
 
     def visitAddress(self, node: Expression) -> tuple[ir.Value, CType] | None:
         # where an assignment or input stores its value
@@ -1559,6 +1592,31 @@ class Compiler:
     # endregion
 
     # region helpers
+    def tbaaTag(self, name: str) -> ir.Value:
+        if name not in self.tbaaTags:
+            typeNode = self.module.add_metadata([name, self.tbaaRoot, ir.Constant(I64, 0)])
+            self.tbaaTags[name] = self.module.add_metadata([typeNode, typeNode, ir.Constant(I64, 0)])
+        return self.tbaaTags[name]
+
+    def tagged(self, instruction: ir.Instruction, name: str | None) -> ir.Instruction:
+        if name is not None:
+            instruction.set_metadata("tbaa", self.tbaaTag(name))
+        return instruction
+
+    def elementTag(self, elem: CType) -> str:
+        return f"vec element {elem.irType}"
+
+    def load(self, pointer: ir.Value) -> ir.Value:
+        # loads through an address that may carry an alias class (see pointerTags)
+        return self.tagged(self.builder.load(pointer), self.pointerTags.get(pointer))
+
+    def store(self, value: ir.Value, pointer: ir.Value) -> None:
+        self.tagged(self.builder.store(value, pointer), self.pointerTags.get(pointer))
+
+    def withTag(self, pointer: ir.Value, name: str) -> ir.Value:
+        self.pointerTags[pointer] = name
+        return pointer
+
     def currentBlockTerminated(self) -> bool:
         block = self.builder.block
         return block is not None and block.is_terminated
@@ -1660,8 +1718,17 @@ BUILTINS: dict[str, callable] = {
 # each method gets (compiler, object, call node, *arguments); the argument count comes from the signature
 def vecPushBack(compiler: Compiler, target: TypedValue, node: Node, value: TypedValue) -> TypedValue:
     element: ir.Value = compiler.expect(value, target.ctype.elem, node, "pb()")
-    slot: ir.Value = compiler.callRuntime("cpl_vec_push", [target.value])
-    compiler.builder.store(element, compiler.builder.bitcast(slot, target.ctype.elem.irType.as_pointer()))
+    vec: ir.Value = target.value
+
+    # the common case is inlined: there's room, so store and bump the length; otherwise grow first
+    length: ir.Value = compiler.vecLength(vec)
+    capacity: ir.Value = compiler.load(compiler.vecField(vec, 1))
+    isFull: ir.Value = compiler.builder.icmp_unsigned("==", length, capacity)
+    with compiler.builder.if_then(isFull, likely=False):
+        compiler.callRuntime("cpl_vec_grow", [vec])
+
+    compiler.store(element, compiler.vecSlot(vec, target.ctype.elem, length))
+    compiler.store(compiler.builder.add(length, ir.Constant(I64, 1)), compiler.vecField(vec, 0))
     return TypedValue(None, VO)
 
 
@@ -1685,8 +1752,7 @@ def vecBack(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
         compiler.callRuntime("cpl_panic_empty", [])
         compiler.builder.unreachable()
     last: ir.Value = compiler.builder.sub(length, ir.Constant(I64, 1))
-    pointer: ir.Value = compiler.builder.gep(compiler.vecData(target.value, target.ctype.elem), [last], inbounds=True)
-    return TypedValue(compiler.builder.load(pointer), target.ctype.elem)
+    return TypedValue(compiler.load(compiler.vecSlot(target.value, target.ctype.elem, last)), target.ctype.elem)
 
 
 def vecClear(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:

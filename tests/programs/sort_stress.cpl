@@ -1,0 +1,25 @@
+// sorts random vectors of every sortable element type and checks the order; sort_stress.out comes from a Python model
+_ seed: ull = 987654321.
+f rnd() -> ull { seed ^^= seed << 13. seed ^^= seed >> 7. seed ^^= seed << 17. r seed. }
+f mn() {
+    for (_ round: it = 0. round < 30. ++round) {
+        _ n: it = it(rnd() % 3000).
+        _ a: vec<it>. _ b: vec<ll>. _ c: vec<ui>. _ d: vec<ull>. _ e: vec<du>. _ g: vec<ch>. _ h: vec<st>.
+        for (_ i: it = 0. i < n. ++i) {
+            _ x: ull = rnd().
+            _ small: ull = x % 20.
+            a.pb(it(x % 100) - 50). b.pb(ll(x)). c.pb(ui(x)). d.pb(x % 7 * 3000000000000000000).
+            e.pb(du(it(small)) / 4 - 2). g.pb(ch('a' + x % 26)). h.pb(st(x % 1000)).
+        }
+        a.srt(). b.srt(). c.srt(). d.srt(). e.srt(). g.srt(). h.srt().
+        _ checksum: ll = 0.
+        for (_ i: it = 0. i < n. ++i) {
+            checksum = checksum * 31 + a[i] + b[i] % 1000 + ll(c[i] % 1000) + ll(d[i] % 997) + it(e[i] * 4) + g[i] + h[i].sz().
+        }
+        _ ok: bo = true.
+        for (_ i: it = 1. i < n. ++i) {
+            if a[i - 1] > a[i] || b[i - 1] > b[i] || c[i - 1] > c[i] || d[i - 1] > d[i] || e[i - 1] > e[i] || g[i - 1] > g[i] || h[i - 1] > h[i] { ok = false. }
+        }
+        ou @@ n @@ ' ' @@ ok @@ ' ' @@ checksum @@ el.
+    }
+}

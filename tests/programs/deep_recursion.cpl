@@ -1,0 +1,27 @@
+// a recursive DFS two million levels deep: fine, the program runs on a huge stack
+_ g: vec<vec<it>>.
+_ size: vec<it>.
+
+f dfs(v: it, parent: it) {
+    size[v] = 1.
+    for (_ k: it = 0. k < g[v].sz(). ++k) {
+        _ u: it = g[v][k].
+        if u != parent {
+            dfs(u, v).
+            size[v] += size[u].
+        }
+    }
+}
+
+f mn() {
+    _ n: it.
+    in @ n.
+    g = vec<vec<it>>(n).
+    size = vec<it>(n).
+    for (_ i: it = 1. i < n. ++i) {
+        g[i - 1].pb(i).
+        g[i].pb(i - 1).
+    }
+    dfs(0, -1).
+    ou @@ size[0] @@ ' ' @@ size[n / 2] @@ ' ' @@ size[n - 1] @@ el.
+}

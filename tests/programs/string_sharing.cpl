@@ -1,0 +1,26 @@
+// random string operations on a pool of shared strings, appends, substrings and copies mixed; string_sharing.out comes from a Python model
+_ seed: ull = 12345.
+f rnd(n: it) -> it {
+    seed ^^= seed << 13. seed ^^= seed >> 7. seed ^^= seed << 17.
+    r it(seed % ull(n)).
+}
+f mn() {
+    _ k: it = 12.
+    _ pool: vec<st> = vec<st>(k).
+    for (_ step: it = 0. step < 200000. ++step) {
+        _ a: it = rnd(k).
+        _ b: it = rnd(k).
+        _ op: it = rnd(7).
+        if op == 0 { pool[a] = pool[b] + ch('a' + rnd(26)). }
+        else if op == 1 { pool[a] = pool[a] + pool[b]. }
+        else if op == 2 { pool[a] = pool[b]. }
+        else if op == 3 {
+            _ n: ll = pool[b].sz().
+            if n > 0 { _ start: it = rnd(it(n)). pool[a] = pool[b].sub(start, rnd(it(n)) + 1). }
+        }
+        else if op == 4 { pool[a] = pool[b] + st(rnd(1000)). }
+        else if op == 5 { pool[a] = ch('A' + rnd(26)) + pool[b]. }
+        else { if pool[a].sz() > 300 { pool[a] = "". } }
+    }
+    for (_ i: it = 0. i < k. ++i) { ou @@ pool[i].sz() @@ ':' @@ pool[i] @@ el. }
+}

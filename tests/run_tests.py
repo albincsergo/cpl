@@ -14,6 +14,7 @@ Test layout:
     examples/name.cpl               treated like tests/programs
 """
 
+import resource
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,9 @@ from pathlib import Path
 ROOT: Path = Path(__file__).resolve().parent.parent
 MAIN: Path = ROOT / "python" / "main.py"
 TIMEOUT: int = 60
+# every test runs with this much address space, which also exercises the runtime's fallbacks for
+# small limits; it keeps the stack overflow test from filling a quarter of the machine's memory
+ADDRESS_SPACE_LIMIT: int = 4 << 30
 
 
 def readOptional(path: Path, default: str = "") -> str:
@@ -93,6 +97,10 @@ def collectTests(filters: list[str]) -> list[tuple[str, Path]]:
 
 
 def main(arguments: list[str]) -> int:
+    _, hardLimit = resource.getrlimit(resource.RLIMIT_AS)
+    if hardLimit == resource.RLIM_INFINITY or hardLimit > ADDRESS_SPACE_LIMIT:
+        resource.setrlimit(resource.RLIMIT_AS, (ADDRESS_SPACE_LIMIT, hardLimit))
+
     native: bool = "--native" in arguments
     filters: list[str] = [argument for argument in arguments if not argument.startswith("--")]
     tests: list[tuple[str, Path]] = collectTests(filters)
