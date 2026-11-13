@@ -5,6 +5,7 @@ from enum import Enum, auto
 
 from AST import Statement, Program, Expression, InfixExpression, IntegerLiteral, DoubleLiteral, ExpressionStatement 
 from AST import IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStatement, BlockStatement, AssignStatement
+from AST import IfStatement, BooleanLiteral
 
 # precedence types
 class PrecedenceType(Enum):
@@ -25,7 +26,13 @@ PRECEDENCES: dict[TokenType, PrecedenceType] = {
     TokenType.MULTIPLY: PrecedenceType.P_PRODUCT,
     TokenType.DIVIDE: PrecedenceType.P_PRODUCT,
     TokenType.MODULUS: PrecedenceType.P_PRODUCT,
-    TokenType.POWER: PrecedenceType.P_EXPONENT
+    TokenType.POWER: PrecedenceType.P_EXPONENT,
+    TokenType.EQEQ: PrecedenceType.P_EQUALS,
+    TokenType.NOTEQ: PrecedenceType.P_EQUALS,
+    TokenType.LESS: PrecedenceType.P_LESSGREATER,
+    TokenType.GREATER: PrecedenceType.P_LESSGREATER,
+    TokenType.LESSEQ: PrecedenceType.P_LESSGREATER,
+    TokenType.GREATEREQ: PrecedenceType.P_LESSGREATER
 }
 
 class Parser:
@@ -41,7 +48,10 @@ class Parser:
             TokenType.IDENTIFIER: self.parseIdentifier,
             TokenType.INT: self.parseIntegerLiteral,
             TokenType.DOUBLE: self.parseDoubleLiteral,
-            TokenType.LPAREN: self.parseGroupedExpression
+            TokenType.LPAREN: self.parseGroupedExpression,
+            TokenType.TRUE: self.parseBooleanLiteral,
+            TokenType.FALSE: self.parseBooleanLiteral,
+            TokenType.IF: self.parseIfStatement
         }
 
         self.infixParseFns: dict[TokenType, callable] = {
@@ -50,7 +60,13 @@ class Parser:
             TokenType.MULTIPLY: self.parseInfixExpression,
             TokenType.DIVIDE: self.parseInfixExpression,
             TokenType.MODULUS: self.parseInfixExpression,
-            TokenType.POWER: self.parseInfixExpression
+            TokenType.POWER: self.parseInfixExpression,
+            TokenType.EQEQ: self.parseInfixExpression,
+            TokenType.NOTEQ: self.parseInfixExpression,
+            TokenType.LESS: self.parseInfixExpression,
+            TokenType.GREATER: self.parseInfixExpression,
+            TokenType.LESSEQ: self.parseInfixExpression,
+            TokenType.GREATEREQ: self.parseInfixExpression
         }
 
         self.nextToken()
@@ -231,6 +247,30 @@ class Parser:
         self.nextToken()
 
         return statement
+    
+    def parseIfStatement(self) -> IfStatement:
+        condition: Expression = None
+        consequence: BlockStatement = None
+        alternative: BlockStatement = None
+
+        self.nextToken()
+
+        condition = self.parseExpression(PrecedenceType.P_LOWEST)
+
+        if not self.expectPeek(TokenType.LBRACE):
+            return None
+        
+        consequence = self.parseBlockStatement()
+
+        if self.peekTokenIs(TokenType.ELSE):
+            self.nextToken()
+
+            if not self.expectPeek(TokenType.LBRACE):
+                return None
+            
+            alternative = self.parseBlockStatement()
+
+        return IfStatement(condition, consequence, alternative)
     # endregion
 
     # region expression helpers
@@ -291,4 +331,7 @@ class Parser:
     
     def parseIdentifier(self) -> IdentifierLiteral:
         return IdentifierLiteral(value=self.currentToken.literal)
+    
+    def parseBooleanLiteral(self) -> BooleanLiteral:
+        return BooleanLiteral(value=self.currentTokenIs(TokenType.TRUE))
     # endregion 

@@ -1,27 +1,39 @@
-from Lexer import Lexer
-from Parser import Parser
-from AST import Program
-from Compiler import Compiler
 import json
+import os
 import time
 from pathlib import Path
+from ctypes import CFUNCTYPE, c_int
 
 from llvmlite import ir
 import llvmlite.binding as llvm
-from ctypes import CFUNCTYPE, c_int, c_double
 
-LEXER_DEBUG: bool = 0
-PARSER_DEBUG: bool = 0
-COMPILER_DEBUG: bool = 0
-RUN_PROGRAM: bool = 1
+from AST import Program
+from Compiler import Compiler
+from Lexer import Lexer
+from Parser import Parser
+
+
+def envFlag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 
 # resolve paths relative to the repo root so the script works from any directory
-ROOT_DIR: Path = Path(__file__).resolve().parent.parent
-TEST_FILE: Path = ROOT_DIR / "tests" / "test.cpl"
-DEBUG_DIR: Path = ROOT_DIR / "debug"
+BASE_DIR: Path = Path(__file__).resolve().parent
+REPO_ROOT: Path = BASE_DIR.parent
+DEBUG_DIR: Path = REPO_ROOT / "debug"
 
-if __name__ == '__main__':
-    with open(TEST_FILE, "r") as f:
+LEXER_DEBUG: bool = envFlag("CPL_LEXER_DEBUG", False)
+PARSER_DEBUG: bool = envFlag("CPL_PARSER_DEBUG", False)
+COMPILER_DEBUG: bool = envFlag("CPL_COMPILER_DEBUG", False)
+RUN_PROGRAM: bool = envFlag("CPL_RUN_PROGRAM", True)
+
+
+if __name__ == "__main__":
+    sourcePath = Path(os.environ.get("CPL_SOURCE", str(REPO_ROOT / "tests" / "test.cpl")))
+    with open(sourcePath, "r") as f:
         source: str = f.read()
 
     if LEXER_DEBUG:
@@ -32,21 +44,20 @@ if __name__ == '__main__':
 
     lexer: Lexer = Lexer(source)
     parser: Parser = Parser(lexer)
-
     program: Program = parser.parseProgram()
-    
+
     if len(parser.errors) > 0:
         for error in parser.errors:
             print(error)
-        exit(1)
+        raise SystemExit(1)
 
     if PARSER_DEBUG:
-        print("=== PARSER DEBUG ===")
         DEBUG_DIR.mkdir(exist_ok=True)
-        with open(DEBUG_DIR / "ast.json", "w") as f:
+        astPath = DEBUG_DIR / "ast.json"
+        print("=== PARSER DEBUG ===")
+        with open(astPath, "w") as f:
             json.dump(program.json(), f, indent=4)
-        
-        print ("AST saved to ast.json")
+        print(f"AST saved to {astPath}")
 
     compiler: Compiler = Compiler()
     compiler.compile(program)
@@ -54,7 +65,7 @@ if __name__ == '__main__':
     if len(compiler.errors) > 0:
         for error in compiler.errors:
             print(error)
-        exit(1)
+        raise SystemExit(1)
 
     # output
     module: ir.Module = compiler.module
@@ -62,9 +73,11 @@ if __name__ == '__main__':
 
     if COMPILER_DEBUG:
         DEBUG_DIR.mkdir(exist_ok=True)
-        with open(DEBUG_DIR / "a.ll", "w") as f:
+        irPath = DEBUG_DIR / "a.ll"
+        with open(irPath, "w") as f:
             f.write(str(module))
         print("=== COMPILER DEBUG ===")
+        print(f"IR saved to {irPath}")
         print(module)
 
     if RUN_PROGRAM:
@@ -75,7 +88,7 @@ if __name__ == '__main__':
             pass
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()
-        
+
         try:
             llvmIrParsed = llvm.parse_assembly(str(module))
             llvmIrParsed.verify()
@@ -84,14 +97,14 @@ if __name__ == '__main__':
             raise
 
         targetMachine = llvm.Target.from_default_triple().create_target_machine()
-
         engine = llvm.create_mcjit_compiler(llvmIrParsed, targetMachine)
         engine.finalize_object()
 
-        entry = engine.get_function_address('mn')
+        entryName = os.environ.get("CPL_ENTRY", "mn")
+        entry = engine.get_function_address(entryName)
         if entry == 0:
-            print("~~~ COMPILE ERROR: No entry function 'mn' found.")
-            exit(1)
+            print(f"~~~ COMPILE ERROR: No entry function '{entryName}' found.")
+            raise SystemExit(1)
 
         cfunc = CFUNCTYPE(c_int)(entry)
 
@@ -99,4 +112,5 @@ if __name__ == '__main__':
         result = cfunc()
         endTime = time.time()
 
-        print(f'\nProgram returned: {result}\n === Executed in {round((endTime - startTime) * 1000, 9)} ms. ===')
+        elapsedMs = round((endTime - startTime) * 1000, 9)
+        print(f"\nProgram returned: {result}\n === Executed in {elapsedMs} ms. ===")

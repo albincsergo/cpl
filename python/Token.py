@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Any
 
+
 class TokenType(Enum):
     # special tokens
     EOF = "EOF" # end of file
@@ -29,10 +30,22 @@ class TokenType(Enum):
     EQUALS = "EQUALS"
     ARROW = "ARROW"
 
+    # comparison symbols
+    LESS = '<'
+    GREATER = '>'
+    EQEQ = '=='
+    NOTEQ = '!='
+    LESSEQ = '<='
+    GREATEREQ = '>='
+
     # keywords
     SHALL = "SHALL"
     FUNC = "FUNC"
     RET = "RET"
+    IF = "IF"
+    ELSE = "ELSE"
+    TRUE = "TRUE"
+    FALSE = "FALSE"
 
     # typing
     TYPE = "TYPE"
@@ -53,15 +66,19 @@ class Token:
 KEYWORDS: dict[str, TokenType] = {
     "shall": TokenType.SHALL,
     "func": TokenType.FUNC,
-    "ret": TokenType.RET
+    "ret": TokenType.RET,
+    "if": TokenType.IF,
+    "else": TokenType.ELSE,
+    "true": TokenType.TRUE,
+    "false": TokenType.FALSE,
 }
 
 ALTERNATIVE_KEYWORDS: dict[str, TokenType] = {
-    "fr": TokenType.DOT,
     "eq": TokenType.EQUALS,
     "_": TokenType.SHALL,
     "f": TokenType.FUNC,
-    "r": TokenType.RET
+    "r": TokenType.RET,
+    "els": TokenType.ELSE
 }
 
 TYPE_KEYWORDS: list[str] = ["int", "double"]

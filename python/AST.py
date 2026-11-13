@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
+
 class NodeType(Enum):
     Program = "Program"
 
@@ -11,6 +12,7 @@ class NodeType(Enum):
     ReturnStatement = "ReturnStatement"
     BlockStatement = "BlockStatement"
     AssignStatement = "AssignStatement"
+    IfStatement = "IfStatement"
 
 
     # expressions
@@ -20,6 +22,7 @@ class NodeType(Enum):
     IntegerLiteral = "IntegerLiteral"
     DoubleLiteral = "DoubleLiteral"
     IdentifierLiteral = "IdentifierLiteral"
+    BooleanLiteral = "BooleanLiteral"
 
 class Node(ABC):
     @abstractmethod
@@ -139,6 +142,23 @@ class AssignStatement(Statement):
             "ident": self.ident.json(),
             "rightValue": self.rightValue.json()
         }
+    
+class IfStatement(Expression):
+    def __init__(self, condition: Expression = None, consequence: BlockStatement = None, alternative: BlockStatement = None) -> None:
+        self.condition = condition
+        self.consequence = consequence
+        self.alternative = alternative
+
+    def type(self) -> NodeType:
+        return NodeType.IfStatement
+    
+    def json(self) -> dict:
+        return {
+            "type": self.type().value,
+            "condition": self.condition.json(),
+            "consequence": self.consequence.json(),
+            "alternative": self.alternative.json() if self.alternative is not None else None
+        }
 # endregion
 
 # region expressions
@@ -193,6 +213,19 @@ class IdentifierLiteral(Expression):
 
     def type(self) -> NodeType:
         return NodeType.IdentifierLiteral
+
+    def json(self) -> dict:
+        return {
+            "type": self.type().value,
+            "value": self.value
+        }
+    
+class BooleanLiteral(Expression):
+    def __init__(self, value: bool) -> None:
+        self.value: bool = value
+
+    def type(self) -> NodeType:
+        return NodeType.BooleanLiteral
 
     def json(self) -> dict:
         return {
