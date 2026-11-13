@@ -5,3 +5,4 @@ build/
 python/__pycache__
 cmake-build-debug/
 src/
+debug/

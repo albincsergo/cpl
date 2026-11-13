@@ -137,7 +137,7 @@ class AssignStatement(Statement):
         return {
             "type": self.type().value,
             "ident": self.ident.json(),
-            "rigthValue": self.rightValue.json
+            "rightValue": self.rightValue.json()
         }
 # endregion
 

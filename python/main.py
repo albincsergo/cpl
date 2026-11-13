@@ -4,6 +4,7 @@ from AST import Program
 from Compiler import Compiler
 import json
 import time
+from pathlib import Path
 
 from llvmlite import ir
 import llvmlite.binding as llvm
@@ -14,8 +15,13 @@ PARSER_DEBUG: bool = 0
 COMPILER_DEBUG: bool = 0
 RUN_PROGRAM: bool = 1
 
+# resolve paths relative to the repo root so the script works from any directory
+ROOT_DIR: Path = Path(__file__).resolve().parent.parent
+TEST_FILE: Path = ROOT_DIR / "tests" / "test.cpl"
+DEBUG_DIR: Path = ROOT_DIR / "debug"
+
 if __name__ == '__main__':
-    with open("../tests/test.cpl", "r") as f:
+    with open(TEST_FILE, "r") as f:
         source: str = f.read()
 
     if LEXER_DEBUG:
@@ -36,7 +42,8 @@ if __name__ == '__main__':
 
     if PARSER_DEBUG:
         print("=== PARSER DEBUG ===")
-        with open("../debug/ast.json", "w") as f:
+        DEBUG_DIR.mkdir(exist_ok=True)
+        with open(DEBUG_DIR / "ast.json", "w") as f:
             json.dump(program.json(), f, indent=4)
         
         print ("AST saved to ast.json")
@@ -49,7 +56,8 @@ if __name__ == '__main__':
     module.triple = llvm.get_default_triple()
 
     if COMPILER_DEBUG:
-        with open("../debug/a.ll", "w") as f:
+        DEBUG_DIR.mkdir(exist_ok=True)
+        with open(DEBUG_DIR / "a.ll", "w") as f:
             f.write(str(module))
         print("=== COMPILER DEBUG ===")
         print(module)
