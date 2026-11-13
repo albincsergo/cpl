@@ -1,0 +1,16 @@
+f mn() {
+    _ n: it.
+    in @ n.
+    _ seen: map<st, it>.
+    for (k in rng(n)) {
+        _ name: st.
+        in @ name.
+        _ times: it = seen[name].
+        if times == 0 {
+            ou @@ "OK" @@ el.
+        } else {
+            ou @@ name @@ times @@ el.
+        }
+        seen[name] = times + 1.
+    }
+}

@@ -1,0 +1,69 @@
+// iterative number theoretic transform mod 998244353 (primitive root 3)
+_ mod: ll = 998244353.
+
+f power(base: ll, exponent: ll) -> ll {
+    _ result: ll = 1.
+    base %= mod.
+    wh exponent > 0 {
+        if exponent & 1 { result = result * base % mod. }
+        base = base * base % mod.
+        exponent >>= 1.
+    }
+    r result.
+}
+
+f ntt(a: vec<ll>, invert: bo) {
+    _ n: it = it(a.sz()).
+    _ j: it = 0.
+    for (i in rng(1, n)) {
+        _ bit: it = n >> 1.
+        wh j & bit {
+            j ^^= bit.
+            bit >>= 1.
+        }
+        j ^^= bit.
+        if i < j { swap(a[i], a[j]). }
+    }
+    _ length: it = 2.
+    wh length <= n {
+        _ w: ll = power(3, (mod - 1) / length).
+        if invert { w = power(w, mod - 2). }
+        _ half: it = length / 2.
+        _ roots: vec<ll> = vec<ll>(half).
+        roots[0] = 1.
+        for (k in rng(1, half)) { roots[k] = roots[k - 1] * w % mod. }
+        for (i in rng(0, n, length)) {
+            for (k in rng(half)) {
+                _ u: ll = a[i + k].
+                _ v: ll = a[i + k + half] * roots[k] % mod.
+                a[i + k] = u + v < mod ? u + v : u + v - mod.
+                a[i + k + half] = u - v >= 0 ? u - v : u - v + mod.
+            }
+        }
+        length <<= 1.
+    }
+    if invert {
+        _ inverse: ll = power(n, mod - 2).
+        for (i in rng(n)) { a[i] = a[i] * inverse % mod. }
+    }
+}
+
+f mn() {
+    _ n, m: it.
+    in @ n @ m.
+    _ size: it = 1.
+    wh size < n + m - 1 { size <<= 1. }
+    _ a: vec<ll> = vec<ll>(size).
+    _ b: vec<ll> = vec<ll>(size).
+    for (i in rng(n)) { in @ a[i]. }
+    for (i in rng(m)) { in @ b[i]. }
+    ntt(a, false).
+    ntt(b, false).
+    for (i in rng(size)) { a[i] = a[i] * b[i] % mod. }
+    ntt(a, true).
+    for (i in rng(n + m - 1)) {
+        if i > 0 { ou @@ ' '. }
+        ou @@ a[i].
+    }
+    ou @@ el.
+}

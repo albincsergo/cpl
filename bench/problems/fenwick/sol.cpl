@@ -1,0 +1,35 @@
+_ tree: vec<ll>.
+_ n: it.
+
+f add(p: it, x: ll) {
+    p++.
+    wh p <= n {
+        tree[p] += x.
+        p += p & -p.
+    }
+}
+
+f prefix(p: it) -> ll {
+    _ total: ll = 0.
+    wh p > 0 {
+        total += tree[p].
+        p -= p & -p.
+    }
+    r total.
+}
+
+f mn() {
+    _ q: it.
+    in @ n @ q.
+    tree = vec<ll>(n + 1).
+    for (i in rng(n)) {
+        _ a: ll.
+        in @ a.
+        add(i, a).
+    }
+    for (k in rng(q)) {
+        _ t, a, b: it.
+        in @ t @ a @ b.
+        if t == 0 { add(a, b). } else { ou @@ prefix(b) - prefix(a) @@ el. }
+    }
+}

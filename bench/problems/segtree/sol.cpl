@@ -1,0 +1,56 @@
+// recursive max segment tree; type 3 descends to the first index >= x whose value is >= v
+_ tree: vec<it>.
+_ values: vec<it>.
+
+f build(node: it, l: it, r: it) {
+    if l == r { tree[node] = values[l]. r. }
+    _ m: it = (l + r) / 2.
+    build(2 * node, l, m).
+    build(2 * node + 1, m + 1, r).
+    tree[node] = max(tree[2 * node], tree[2 * node + 1]).
+}
+
+f update(node: it, l: it, r: it, p: it, v: it) {
+    if l == r { tree[node] = v. r. }
+    _ m: it = (l + r) / 2.
+    if p <= m { update(2 * node, l, m, p, v). } else { update(2 * node + 1, m + 1, r, p, v). }
+    tree[node] = max(tree[2 * node], tree[2 * node + 1]).
+}
+
+f query(node: it, l: it, r: it, ql: it, qr: it) -> it {
+    if qr < l || r < ql { r -1. }
+    if ql <= l && r <= qr { r tree[node]. }
+    _ m: it = (l + r) / 2.
+    r max(query(2 * node, l, m, ql, qr), query(2 * node + 1, m + 1, r, ql, qr)).
+}
+
+// the first index >= from with value >= v, or -1
+f first(node: it, l: it, r: it, from: it, v: it) -> it {
+    if r < from || tree[node] < v { r -1. }
+    if l == r { r l. }
+    _ m: it = (l + r) / 2.
+    _ left: it = first(2 * node, l, m, from, v).
+    if left != -1 { r left. }
+    r first(2 * node + 1, m + 1, r, from, v).
+}
+
+f mn() {
+    _ n, q: it.
+    in @ n @ q.
+    values = vec<it>(n + 1).
+    for (i in rng(1, n + 1)) { in @ values[i]. }
+    tree = vec<it>(4 * n + 4).
+    build(1, 1, n).
+    for (k in rng(q)) {
+        _ t, a, b: it.
+        in @ t @ a @ b.
+        if t == 1 {
+            update(1, 1, n, a, b).
+        } else if t == 2 {
+            ou @@ query(1, 1, n, a, b) @@ el.
+        } else {
+            _ j: it = first(1, 1, n, a, b).
+            ou @@ (j == -1 ? n + 1 : j) @@ el.
+        }
+    }
+}

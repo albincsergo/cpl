@@ -1,0 +1,66 @@
+// distinct substrings = n(n+1)/2 - sum of LCPs; suffix array by prefix doubling over cyclic shifts of s + '$'
+f mn() {
+    _ s: st.
+    in @ s.
+    _ n: it = it(s.sz()) + 1.
+    _ text: vec<it> = vec<it>(n).
+    for (i, c in s) { text[i] = c - 'a' + 1. }
+
+    _ alphabet: it = max(27, n).
+    _ sa: vec<it> = vec<it>(n).
+    _ cls: vec<it> = vec<it>(n).
+    _ count: vec<it> = vec<it>(alphabet).
+    for (i in rng(n)) { count[text[i]]++. }
+    for (i in rng(1, 27)) { count[i] += count[i - 1]. }
+    for (i in rng(n - 1, -1, -1)) {
+        count[text[i]]--.
+        sa[count[text[i]]] = i.
+    }
+    _ classes: it = 1.
+    for (i in rng(1, n)) {
+        if text[sa[i]] != text[sa[i - 1]] { classes++. }
+        cls[sa[i]] = classes - 1.
+    }
+
+    _ shifted: vec<it> = vec<it>(n).
+    _ newCls: vec<it> = vec<it>(n).
+    _ k: it = 1.
+    wh k < n && classes < n {
+        for (i in rng(n)) {
+            shifted[i] = sa[i] - k.
+            if shifted[i] < 0 { shifted[i] += n. }
+        }
+        for (i in rng(classes)) { count[i] = 0. }
+        for (i in rng(n)) { count[cls[shifted[i]]]++. }
+        for (i in rng(1, classes)) { count[i] += count[i - 1]. }
+        for (i in rng(n - 1, -1, -1)) {
+            _ c: it = cls[shifted[i]].
+            count[c]--.
+            sa[count[c]] = shifted[i].
+        }
+        newCls[sa[0]] = 0.
+        classes = 1.
+        for (i in rng(1, n)) {
+            _ a: it = sa[i] + k.
+            _ b: it = sa[i - 1] + k.
+            if a >= n { a -= n. }
+            if b >= n { b -= n. }
+            if cls[sa[i]] != cls[sa[i - 1]] || cls[a] != cls[b] { classes++. }
+            newCls[sa[i]] = classes - 1.
+        }
+        swap(cls, newCls).
+        k *= 2.
+    }
+
+    // Kasai: rank is cls (all classes are distinct now)
+    _ lcpTotal: ll = 0.
+    _ h: it = 0.
+    for (i in rng(n - 1)) {
+        _ j: it = sa[cls[i] - 1].
+        wh text[i + h] == text[j + h] { h++. }
+        lcpTotal += h.
+        if h > 0 { h--. }
+    }
+    _ length: ll = n - 1.
+    ou @@ length * (length + 1) / 2 - lcpTotal @@ el.
+}

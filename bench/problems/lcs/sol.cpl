@@ -1,0 +1,36 @@
+// O(nm) DP in one flat table, then walk back from the end to rebuild one longest subsequence
+f mn() {
+    _ s, t: st.
+    in @ s @ t.
+    _ n: it = it(s.sz()).
+    _ m: it = it(t.sz()).
+    _ width: it = m + 1.
+    _ dp: vec<it> = vec<it>((n + 1) * width).
+    for (i in rng(1, n + 1)) {
+        _ a: ch = s[i - 1].
+        for (j in rng(1, m + 1)) {
+            if a == t[j - 1] {
+                dp[i * width + j] = dp[(i - 1) * width + j - 1] + 1.
+            } else {
+                dp[i * width + j] = max(dp[(i - 1) * width + j], dp[i * width + j - 1]).
+            }
+        }
+    }
+    _ answer: vec<ch>.
+    _ i: it = n.
+    _ j: it = m.
+    wh i > 0 && j > 0 {
+        if s[i - 1] == t[j - 1] {
+            answer.pb(s[i - 1]).
+            i--.
+            j--.
+        } else if dp[(i - 1) * width + j] >= dp[i * width + j - 1] {
+            i--.
+        } else {
+            j--.
+        }
+    }
+    answer.rev().
+    for (c in answer) { ou @@ c. }
+    ou @@ el.
+}

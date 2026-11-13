@@ -1,0 +1,18 @@
+// a_j - a_i = j - i  <=>  a_j - j = a_i - i: count equal values of a_i - i
+f mn() {
+    _ t: it.
+    in @ t.
+    for (test in rng(t)) {
+        _ n: it.
+        in @ n.
+        _ count: map<it, it>.
+        _ pairs: ll = 0.
+        for (i in rng(n)) {
+            _ a: it.
+            in @ a.
+            pairs += count[a - i].
+            count[a - i]++.
+        }
+        ou @@ pairs @@ el.
+    }
+}

@@ -1,0 +1,2 @@
+AtCoder Library Practice Contest I - Number of Substrings
+https://atcoder.jp/contests/practice2/tasks/practice2_i

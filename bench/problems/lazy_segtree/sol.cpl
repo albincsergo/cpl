@@ -1,0 +1,73 @@
+// recursive lazy segment tree; a pending (b, c) on a node means "x -> b * x + c" for its children
+_ mod: ll = 998244353.
+_ sum: vec<ll>.
+_ mul: vec<ll>.
+_ add: vec<ll>.
+_ values: vec<ll>.
+
+f apply(node: it, length: it, b: ll, c: ll) {
+    sum[node] = (sum[node] * b + c * length) % mod.
+    mul[node] = mul[node] * b % mod.
+    add[node] = (add[node] * b + c) % mod.
+}
+
+f push(node: it, l: it, r: it) {
+    if mul[node] == 1 && add[node] == 0 { r. }
+    _ m: it = (l + r) / 2.
+    apply(2 * node, m - l + 1, mul[node], add[node]).
+    apply(2 * node + 1, r - m, mul[node], add[node]).
+    mul[node] = 1.
+    add[node] = 0.
+}
+
+f build(node: it, l: it, r: it) {
+    mul[node] = 1.
+    if l == r { sum[node] = values[l]. r. }
+    _ m: it = (l + r) / 2.
+    build(2 * node, l, m).
+    build(2 * node + 1, m + 1, r).
+    sum[node] = (sum[2 * node] + sum[2 * node + 1]) % mod.
+}
+
+f update(node: it, l: it, r: it, ql: it, qr: it, b: ll, c: ll) {
+    if qr < l || r < ql { r. }
+    if ql <= l && r <= qr {
+        apply(node, r - l + 1, b, c).
+        r.
+    }
+    push(node, l, r).
+    _ m: it = (l + r) / 2.
+    update(2 * node, l, m, ql, qr, b, c).
+    update(2 * node + 1, m + 1, r, ql, qr, b, c).
+    sum[node] = (sum[2 * node] + sum[2 * node + 1]) % mod.
+}
+
+f query(node: it, l: it, r: it, ql: it, qr: it) -> ll {
+    if qr < l || r < ql { r 0. }
+    if ql <= l && r <= qr { r sum[node]. }
+    push(node, l, r).
+    _ m: it = (l + r) / 2.
+    r (query(2 * node, l, m, ql, qr) + query(2 * node + 1, m + 1, r, ql, qr)) % mod.
+}
+
+f mn() {
+    _ n, q: it.
+    in @ n @ q.
+    values = vec<ll>(n).
+    for (i in rng(n)) { in @ values[i]. }
+    sum = vec<ll>(4 * n).
+    mul = vec<ll>(4 * n).
+    add = vec<ll>(4 * n).
+    build(1, 0, n - 1).
+    for (k in rng(q)) {
+        _ t, l, r: it.
+        in @ t @ l @ r.
+        if t == 0 {
+            _ b, c: ll.
+            in @ b @ c.
+            update(1, 0, n - 1, l, r - 1, b, c).
+        } else {
+            ou @@ query(1, 0, n - 1, l, r - 1) @@ el.
+        }
+    }
+}

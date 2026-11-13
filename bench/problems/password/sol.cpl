@@ -1,0 +1,24 @@
+// the longest border of s that also occurs strictly inside s, via the prefix function
+f mn() {
+    _ s: st.
+    in @ s.
+    _ n: it = it(s.sz()).
+    _ pi: vec<it> = vec<it>(n).
+    for (i in rng(1, n)) {
+        _ k: it = pi[i - 1].
+        wh k > 0 && s[i] != s[k] { k = pi[k - 1]. }
+        if s[i] == s[k] { k++. }
+        pi[i] = k.
+    }
+    _ border: it = pi[n - 1].
+    if border > 0 {
+        for (i in rng(n - 1)) {
+            if pi[i] == border {
+                ou @@ s.sub(0, border) @@ el.
+                r.
+            }
+        }
+        border = pi[border - 1].
+    }
+    if border > 0 { ou @@ s.sub(0, border) @@ el. } else { ou @@ "Just a legend" @@ el. }
+}

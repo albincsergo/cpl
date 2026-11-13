@@ -1,0 +1,2 @@
+AtCoder Library Practice Contest A - Disjoint Set Union
+https://atcoder.jp/contests/practice2/tasks/practice2_a

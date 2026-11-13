@@ -1,0 +1,34 @@
+// union by size with path halving
+_ parent: vec<it>.
+_ size: vec<it>.
+
+f find(x: it) -> it {
+    wh parent[x] != x {
+        parent[x] = parent[parent[x]].
+        x = parent[x].
+    }
+    r x.
+}
+
+f mn() {
+    _ n, q: it.
+    in @ n @ q.
+    parent = vec<it>(n).
+    size = vec<it>(n, 1).
+    for (i in rng(n)) { parent[i] = i. }
+    for (k in rng(q)) {
+        _ t, u, v: it.
+        in @ t @ u @ v.
+        _ a: it = find(u).
+        _ b: it = find(v).
+        if t == 0 {
+            if a != b {
+                if size[a] < size[b] { swap(a, b). }
+                parent[b] = a.
+                size[a] += size[b].
+            }
+        } else {
+            ou @@ (a == b ? 1 : 0) @@ el.
+        }
+    }
+}

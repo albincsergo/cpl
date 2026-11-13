@@ -1,0 +1,14 @@
+f mn() {
+    _ n, capacity: it.
+    in @ n @ capacity.
+    _ best: vec<ll> = vec<ll>(capacity + 1).
+    for (k in rng(n)) {
+        _ w: it.
+        _ v: ll.
+        in @ w @ v.
+        for (c in rng(capacity, w - 1, -1)) {
+            best[c] = max(best[c], best[c - w] + v).
+        }
+    }
+    ou @@ best[capacity] @@ el.
+}

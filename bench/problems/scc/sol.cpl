@@ -1,0 +1,80 @@
+// recursive Tarjan over compressed adjacency lists; Tarjan finds components in reverse topological order
+_ start, adj, order, low, stack, comp: vec<it>.
+_ onStack: vec<bo>.
+_ counter, components: it.
+
+f dfs(v: it) {
+    counter++.
+    order[v] = counter.
+    low[v] = counter.
+    stack.pb(v).
+    onStack[v] = true.
+    for (k in rng(start[v], start[v + 1])) {
+        _ u: it = adj[k].
+        if order[u] == 0 {
+            dfs(u).
+            low[v] = min(low[v], low[u]).
+        } else if onStack[u] {
+            low[v] = min(low[v], order[u]).
+        }
+    }
+    if low[v] == order[v] {
+        wh true {
+            _ u: it = stack.bk().
+            stack.pp().
+            onStack[u] = false.
+            comp[u] = components.
+            if u == v { brk. }
+        }
+        components++.
+    }
+}
+
+f mn() {
+    _ n, m: it.
+    in @ n @ m.
+    _ from: vec<it> = vec<it>(m).
+    _ to: vec<it> = vec<it>(m).
+    start = vec<it>(n + 1).
+    for (i in rng(m)) {
+        in @ from[i] @ to[i].
+        start[from[i] + 1]++.
+    }
+    for (v in rng(n)) { start[v + 1] += start[v]. }
+    _ fill: vec<it> = vec<it>(n).
+    for (v in rng(n)) { fill[v] = start[v]. }
+    adj = vec<it>(m).
+    for (i in rng(m)) {
+        adj[fill[from[i]]] = to[i].
+        fill[from[i]]++.
+    }
+
+    order = vec<it>(n).
+    low = vec<it>(n).
+    comp = vec<it>(n).
+    onStack = vec<bo>(n).
+    for (v in rng(n)) {
+        if order[v] == 0 { dfs(v). }
+    }
+
+    // line j of the output is component components - 1 - j; a counting sort keeps vertices ascending
+    _ count: vec<it> = vec<it>(components).
+    for (v in rng(n)) { count[components - 1 - comp[v]]++. }
+    _ lineStart: vec<it> = vec<it>(components + 1).
+    for (j in rng(components)) { lineStart[j + 1] = lineStart[j] + count[j]. }
+    _ next: vec<it> = vec<it>(components).
+    for (j in rng(components)) { next[j] = lineStart[j]. }
+    _ grouped: vec<it> = vec<it>(n).
+    for (v in rng(n)) {
+        _ j: it = components - 1 - comp[v].
+        grouped[next[j]] = v.
+        next[j]++.
+    }
+
+    ou @@ components @@ el.
+    for (j in rng(components)) {
+        ou @@ count[j].
+        for (k in rng(lineStart[j], lineStart[j + 1])) { ou @@ ' ' @@ grouped[k]. }
+        ou @@ el.
+    }
+}

@@ -1,0 +1,43 @@
+f mn() {
+    _ n, m: it.
+    in @ n @ m.
+    _ graph: vec<vec<pr<it, it>>> = vec<vec<pr<it, it>>>(n + 1).
+    for (k in rng(m)) {
+        _ a, b, w: it.
+        in @ a @ b @ w.
+        graph[a].pb(pr(b, w)).
+        graph[b].pb(pr(a, w)).
+    }
+    _ infinity: ll = 1e18.
+    _ distance: vec<ll> = vec<ll>(n + 1, infinity).
+    _ parent: vec<it> = vec<it>(n + 1).
+    _ queue: minpq<pr<ll, it>>.
+    distance[1] = 0.
+    queue.ps(pr(ll(0), 1)).
+    wh !queue.emp() {
+        _ current: pr<ll, it> = queue.tp().
+        queue.pp().
+        if current.f > distance[current.s] { cont. }
+        for (edge in graph[current.s]) {
+            _ next: ll = current.f + edge.s.
+            if next < distance[edge.f] {
+                distance[edge.f] = next.
+                parent[edge.f] = current.s.
+                queue.ps(pr(next, edge.f)).
+            }
+        }
+    }
+    if distance[n] == infinity {
+        ou @@ -1 @@ el.
+        r.
+    }
+    _ path: vec<it>.
+    _ v: it = n.
+    wh v != 1 {
+        path.pb(v).
+        v = parent[v].
+    }
+    path.pb(1).
+    path.rev().
+    ou @@ path @@ el.
+}

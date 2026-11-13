@@ -1,0 +1,28 @@
+// hash every good substring with two polynomial hashes packed into one ll, then count distinct ones
+f mn() {
+    _ s, goodness: st.
+    _ k: it.
+    in @ s @ goodness @ k.
+    _ n: it = it(s.sz()).
+    _ mod1: ll = 1000000007.
+    _ mod2: ll = 998244353.
+    _ hashes: vec<ll>.
+    for (i in rng(n)) {
+        _ h1, h2: ll.
+        _ bad: it = 0.
+        for (j in rng(i, n)) {
+            _ c: it = s[j] - 'a'.
+            if goodness[c] == '0' { bad++. }
+            if bad > k { brk. }
+            h1 = (h1 * 131 + c + 1) % mod1.
+            h2 = (h2 * 137 + c + 1) % mod2.
+            hashes.pb(h1 * mod2 + h2).
+        }
+    }
+    hashes.srt().
+    _ distinct: it = 0.
+    for (i, h in hashes) {
+        if i == 0 || h != hashes[i - 1] { distinct++. }
+    }
+    ou @@ distinct @@ el.
+}

@@ -1,0 +1,22 @@
+// ways[mask] = ways to pair the first pc(mask) men with the women in mask
+_ mod: ll = 1000000007.
+
+f mn() {
+    _ n: it.
+    in @ n.
+    _ compatible: vec<it> = vec<it>(n * n).
+    for (i in rng(n * n)) { in @ compatible[i]. }
+    _ ways: vec<ll> = vec<ll>(1 << n).
+    ways[0] = 1.
+    for (mask in rng(1, 1 << n)) {
+        _ man: it = pc(mask) - 1.
+        _ total: ll = 0.
+        for (woman in rng(n)) {
+            if (mask >> woman & 1) != 0 && compatible[man * n + woman] == 1 {
+                total += ways[mask ^^ (1 << woman)].
+            }
+        }
+        ways[mask] = total % mod.
+    }
+    ou @@ ways[(1 << n) - 1] @@ el.
+}

@@ -1,0 +1,18 @@
+// chance[k] = probability of k heads among the coins so far
+f mn() {
+    _ n: it.
+    in @ n.
+    _ chance: vec<du> = vec<du>(n + 1).
+    chance[0] = 1.
+    for (i in rng(n)) {
+        _ p: du.
+        in @ p.
+        for (k in rng(i + 1, 0, -1)) {
+            chance[k] = chance[k] * (1 - p) + chance[k - 1] * p.
+        }
+        chance[0] *= 1 - p.
+    }
+    _ answer: du = 0.
+    for (k in rng(n / 2 + 1, n + 1)) { answer += chance[k]. }
+    ou @@ prec(answer, 10) @@ el.
+}

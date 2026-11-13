@@ -1,0 +1,18 @@
+// for each middle part: (uppers smaller than it) * (lowers bigger than it), found by binary search
+f mn() {
+    _ n: it.
+    in @ n.
+    _ a: vec<it> = vec<it>(n).
+    _ b: vec<it> = vec<it>(n).
+    _ c: vec<it> = vec<it>(n).
+    for (i in rng(n)) { in @ a[i]. }
+    for (i in rng(n)) { in @ b[i]. }
+    for (i in rng(n)) { in @ c[i]. }
+    a.srt().
+    c.srt().
+    _ total: ll = 0.
+    for (x in b) {
+        total += a.lb(x) * (n - c.ub(x)).
+    }
+    ou @@ total @@ el.
+}

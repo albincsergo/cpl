@@ -1,0 +1,2 @@
+AtCoder Library Practice Contest G - SCC
+https://atcoder.jp/contests/practice2/tasks/practice2_g

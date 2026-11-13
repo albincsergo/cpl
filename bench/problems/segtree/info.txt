@@ -1,0 +1,2 @@
+AtCoder Library Practice Contest J - Segment Tree
+https://atcoder.jp/contests/practice2/tasks/practice2_j
