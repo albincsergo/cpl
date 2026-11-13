@@ -1,6 +1,6 @@
-#/bin/bash
+#!/bin/bash
 
-# This script should be used to build the project
+# This script runs the compiler and executes the generated IR
 ./build/cpl
 cat a.ll
 lli a.ll

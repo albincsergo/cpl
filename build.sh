@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 # This script should be used to build the project
 if [ "$1" = "--setup" ]
