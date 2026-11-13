@@ -28,8 +28,9 @@ class Lexer:
             
             self.readChar()
 
-    def newToken(self, tokenType: TokenType, literal: Any) -> Token:
-        return Token(type=tokenType, literal=literal, lineNumber=self.lineNumber, position=self.position)
+    def newToken(self, tokenType: TokenType, literal: Any, position: int | None = None) -> Token:
+        position = self.position if position is None else position
+        return Token(type=tokenType, literal=literal, lineNumber=self.lineNumber, position=position)
     
     def readNumber(self) -> Token:
         startPosition: int = self.position
@@ -42,7 +43,7 @@ class Lexer:
 
             if decimalCounter > 1:
                 print(f"Error: Invalid number format at line {self.lineNumber}, position {self.position}")
-                return self.newToken(TokenType.ILLEGAL, self.source[startPosition:self.position])
+                return self.newToken(TokenType.ILLEGAL, self.source[startPosition:self.position], startPosition)
             
             output += self.currentChar
             self.readChar()
@@ -51,11 +52,11 @@ class Lexer:
                 break
         
         if decimalCounter == 0:
-            return self.newToken(TokenType.INT, int(output))
+            return self.newToken(TokenType.INT, int(output), startPosition)
         else:
-            return self.newToken(TokenType.DOUBLE, float(output.replace(',', '.')))
+            return self.newToken(TokenType.DOUBLE, float(output.replace(',', '.')), startPosition)
         
-    def isLetter(self, char: str) -> Token:
+    def isLetter(self, char: str) -> bool:
         return 'a' <= char and char <= 'z' or 'A' <= char and char <= 'Z' or char == '_'
 
     def readIdentifier(self) -> str:
@@ -64,6 +65,11 @@ class Lexer:
             self.readChar()
         
         return self.source[position:self.position]
+
+    def skipComment(self) -> None:
+        # skips a '//' comment up to (not including) the end of the line
+        while self.currentChar is not None and self.currentChar != '\n':
+            self.readChar()
 
     def peekChar(self) -> str | None:
         if self.readPosition >= len(self.source):
@@ -88,6 +94,9 @@ class Lexer:
             case '*':
                 token = self.newToken(TokenType.MULTIPLY, self.currentChar)
             case '/':
+                if self.peekChar() == '/':
+                    self.skipComment()
+                    return self.nextToken()
                 token = self.newToken(TokenType.DIVIDE, self.currentChar)
             case '^':
                 token = self.newToken(TokenType.POWER, self.currentChar)
@@ -111,10 +120,10 @@ class Lexer:
                 token = self.newToken(TokenType.EOF, "")
             case _:
                 if self.isLetter(self.currentChar):
+                    startPosition: int = self.position
                     literal: str = self.readIdentifier()
                     tokenType: TokenType = lookupIdentifier(literal)
-                    token = self.newToken(tokenType, literal)
-                    return self.newToken(tokenType, literal)
+                    return self.newToken(tokenType, literal, startPosition)
                 elif self.currentChar.isdigit():
                     token = self.readNumber()
                     return token

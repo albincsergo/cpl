@@ -107,8 +107,8 @@ class ReturnStatement(Statement):
         }
     
 class FunctionStatement(Statement):
-    def __init__(self, parameters: list = [], body: BlockStatement = None, name = None, returnType: str = None) -> None:
-        self.parameters = parameters
+    def __init__(self, parameters: list = None, body: BlockStatement = None, name = None, returnType: str = None) -> None:
+        self.parameters = parameters if parameters is not None else []
         self.body = body
         self.name = name
         self.returnType = returnType

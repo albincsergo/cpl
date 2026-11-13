@@ -256,6 +256,10 @@ class Parser:
         infixExpression: InfixExpression = InfixExpression(leftNode=leftNode, operator=self.currentToken.literal)
 
         precedence = self.currentPrecedence()
+
+        # '^' is right-associative: 2 ^ 3 ^ 2 == 2 ^ (3 ^ 2)
+        if self.currentTokenIs(TokenType.POWER):
+            precedence = PrecedenceType(precedence.value - 1)
         
         self.nextToken()
 
