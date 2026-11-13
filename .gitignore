@@ -3,6 +3,6 @@ build/
 *.ll
 .idea/
 python/__pycache__
-cmake-build-debug/
 src/
 debug/
+.venv/

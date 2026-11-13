@@ -1,0 +1,13 @@
+#!/bin/sh
+# runs the CPL compiler; set CPL_PYTHON to pick the Python interpreter
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -n "$CPL_PYTHON" ]; then
+    PYTHON="$CPL_PYTHON"
+elif [ -x "$ROOT/.venv/bin/python" ]; then
+    PYTHON="$ROOT/.venv/bin/python"
+else
+    PYTHON=python3
+fi
+
+exec "$PYTHON" "$ROOT/python/main.py" "$@"

@@ -1,5 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from enum import Enum
+from typing import Any
 
 
 class NodeType(Enum):
@@ -9,227 +10,249 @@ class NodeType(Enum):
     ExpressionStatement = "ExpressionStatement"
     ShallStatement = "ShallStatement"
     FunctionStatement = "FunctionStatement"
+    StructStatement = "StructStatement"
     ReturnStatement = "ReturnStatement"
     BlockStatement = "BlockStatement"
     AssignStatement = "AssignStatement"
     IfStatement = "IfStatement"
-
+    WhileStatement = "WhileStatement"
+    ForStatement = "ForStatement"
+    BreakStatement = "BreakStatement"
+    ContinueStatement = "ContinueStatement"
+    InputStatement = "InputStatement"
+    OutputStatement = "OutputStatement"
 
     # expressions
     InfixExpression = "InfixExpression"
+    PrefixExpression = "PrefixExpression"
+    CallExpression = "CallExpression"
+    IndexExpression = "IndexExpression"
+    MemberExpression = "MemberExpression"
+    CastExpression = "CastExpression"
 
     # literals
     IntegerLiteral = "IntegerLiteral"
     DoubleLiteral = "DoubleLiteral"
-    IdentifierLiteral = "IdentifierLiteral"
     BooleanLiteral = "BooleanLiteral"
+    StringLiteral = "StringLiteral"
+    CharLiteral = "CharLiteral"
+    NilLiteral = "NilLiteral"
+    IdentifierLiteral = "IdentifierLiteral"
+
+
+def toJson(value: Any) -> Any:
+    if isinstance(value, Node) or isinstance(value, TypeExpression):
+        return value.json()
+    if isinstance(value, list) or isinstance(value, tuple):
+        return [toJson(item) for item in value]
+    return value
+
+
+class TypeExpression:
+    # a written type like 'it', 'vec<ll>' or 'arr<it, 100>'
+    def __init__(self, name: str, arguments: list = None, line: int = 0) -> None:
+        self.name = name
+        self.arguments = arguments if arguments is not None else []
+        self.line = line
+
+    def __str__(self) -> str:
+        if len(self.arguments) == 0:
+            return self.name
+        return f"{self.name}<{', '.join(str(argument) for argument in self.arguments)}>"
+
+    def json(self) -> str:
+        return str(self)
+
 
 class Node(ABC):
-    @abstractmethod
-    def type(self) -> NodeType:
-        pass
+    line: int = 0
 
-    @abstractmethod
+    def type(self) -> NodeType:
+        return NodeType(self.__class__.__name__)
+
     def json(self) -> dict:
-        pass
+        output: dict = {"type": self.type().value}
+        for key, value in vars(self).items():
+            output[key] = toJson(value)
+        return output
+
 
 class Statement(Node):
     pass
 
+
 class Expression(Node):
     pass
+
 
 class Program(Node):
     def __init__(self) -> None:
         self.statements: list[Statement] = []
 
-    def type(self) -> NodeType:
-        return NodeType.Program
 
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "statements": [{statement.type().value: statement.json()} for statement in self.statements]
-        }
-    
 # region statements
 class ExpressionStatement(Statement):
     def __init__(self, expression: Expression = None) -> None:
-        self.expression: Expression = expression
+        self.expression = expression
 
-    def type(self) -> NodeType:
-        return NodeType.ExpressionStatement
-
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "expression": self.expression.json()
-        }
 
 class ShallStatement(Statement):
-    def __init__(self, name: Expression = None, value: Expression = None, valueType: str = None) -> None:
-        self.name = name
-        self.value = value
+    # _ name: type = value.
+    def __init__(self, names: list[str] = None, valueType: TypeExpression = None, value: Expression = None) -> None:
+        self.names = names if names is not None else []
         self.valueType = valueType
+        self.value = value
 
-    def type(self) -> NodeType:
-        return NodeType.ShallStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "name": self.name.json(),
-            "value": self.value.json(),
-            "valueType": self.valueType
-        }
 
 class BlockStatement(Statement):
     def __init__(self, statements: list[Statement] = None) -> None:
         self.statements = statements if statements is not None else []
-    
-    def type(self) -> NodeType:
-        return NodeType.BlockStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "statements": [statement.json() for statement in self.statements]
-        }
-    
+
+
 class ReturnStatement(Statement):
     def __init__(self, returnValue: Expression = None) -> None:
         self.returnValue = returnValue
 
-    def type(self) -> NodeType:
-        return NodeType.ReturnStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "returnValue": self.returnValue.json()
-        }
-    
-class FunctionStatement(Statement):
-    def __init__(self, parameters: list = None, body: BlockStatement = None, name = None, returnType: str = None) -> None:
-        self.parameters = parameters if parameters is not None else []
-        self.body = body
-        self.name = name
-        self.returnType = returnType
 
-    def type(self) -> NodeType:
-        return NodeType.FunctionStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "name": self.name.json(),
-            "returnType": self.returnType,
-            "parameters": [par.json() for par in self.parameters],
-            "body": self.body.json()
-        }
-    
+class FunctionStatement(Statement):
+    def __init__(self, name: str = None, parameters: list = None, returnType: TypeExpression = None, body: BlockStatement = None) -> None:
+        self.name = name
+        # list of (name, TypeExpression)
+        self.parameters = parameters if parameters is not None else []
+        self.returnType = returnType
+        self.body = body
+
+
+class StructStatement(Statement):
+    def __init__(self, name: str = None, fields: list = None) -> None:
+        self.name = name
+        # list of (name, TypeExpression)
+        self.fields = fields if fields is not None else []
+
+
 class AssignStatement(Statement):
-    def __init__(self, ident: Expression = None, rightValue: Expression = None) -> None:
-        self.ident = ident
+    # target op= value, where op is '=' for plain assignment
+    def __init__(self, target: Expression = None, operator: str = "=", rightValue: Expression = None) -> None:
+        self.target = target
+        self.operator = operator
         self.rightValue = rightValue
 
-    def type(self) -> NodeType:
-        return NodeType.AssignStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "ident": self.ident.json(),
-            "rightValue": self.rightValue.json()
-        }
-    
-class IfStatement(Expression):
-    def __init__(self, condition: Expression = None, consequence: BlockStatement = None, alternative: BlockStatement = None) -> None:
+
+class IfStatement(Statement):
+    def __init__(self, condition: Expression = None, consequence: BlockStatement = None, alternative: Statement = None) -> None:
         self.condition = condition
         self.consequence = consequence
+        # a BlockStatement, another IfStatement for 'else if', or None
         self.alternative = alternative
 
-    def type(self) -> NodeType:
-        return NodeType.IfStatement
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "condition": self.condition.json(),
-            "consequence": self.consequence.json(),
-            "alternative": self.alternative.json() if self.alternative is not None else None
-        }
+
+class WhileStatement(Statement):
+    def __init__(self, condition: Expression = None, body: BlockStatement = None) -> None:
+        self.condition = condition
+        self.body = body
+
+
+class ForStatement(Statement):
+    def __init__(self, initializer: Statement = None, condition: Expression = None, step: Statement = None, body: BlockStatement = None) -> None:
+        self.initializer = initializer
+        self.condition = condition
+        self.step = step
+        self.body = body
+
+
+class BreakStatement(Statement):
+    pass
+
+
+class ContinueStatement(Statement):
+    pass
+
+
+class InputStatement(Statement):
+    # in @ a @ b.
+    def __init__(self, targets: list[Expression] = None) -> None:
+        self.targets = targets if targets is not None else []
+
+
+class OutputStatement(Statement):
+    # ou @@ a @@ b.
+    def __init__(self, values: list[Expression] = None) -> None:
+        self.values = values if values is not None else []
 # endregion
+
 
 # region expressions
 class InfixExpression(Expression):
     def __init__(self, leftNode: Expression, operator: str, rightNode: Expression = None) -> None:
-        self.leftNode: Expression = leftNode
-        self.operator: str = operator
-        self.rightNode: Expression = rightNode
+        self.leftNode = leftNode
+        self.operator = operator
+        self.rightNode = rightNode
 
-    def type(self) -> NodeType:
-        return NodeType.InfixExpression
-    
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "leftNode": self.leftNode.json(),
-            "operator": self.operator,
-            "rightNode": self.rightNode.json()
-        }   
+
+class PrefixExpression(Expression):
+    def __init__(self, operator: str, rightNode: Expression = None) -> None:
+        self.operator = operator
+        self.rightNode = rightNode
+
+
+class CallExpression(Expression):
+    # function(arguments) or object.method(arguments)
+    def __init__(self, function: Expression, arguments: list[Expression] = None) -> None:
+        self.function = function
+        self.arguments = arguments if arguments is not None else []
+
+
+class IndexExpression(Expression):
+    def __init__(self, leftNode: Expression, index: Expression = None) -> None:
+        self.leftNode = leftNode
+        self.index = index
+
+
+class MemberExpression(Expression):
+    def __init__(self, leftNode: Expression, name: str) -> None:
+        self.leftNode = leftNode
+        self.name = name
+
+
+class CastExpression(Expression):
+    # it(x), st(42), vec<it>(n)
+    def __init__(self, targetType: TypeExpression, arguments: list[Expression] = None) -> None:
+        self.targetType = targetType
+        self.arguments = arguments if arguments is not None else []
 # endregion
+
 
 # region literals
 class IntegerLiteral(Expression):
     def __init__(self, value: int) -> None:
-        self.value: int = value
+        self.value = value
 
-    def type(self) -> NodeType:
-        return NodeType.IntegerLiteral
-
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "value": self.value
-        }
 
 class DoubleLiteral(Expression):
     def __init__(self, value: float) -> None:
-        self.value: float = value
+        self.value = value
 
-    def type(self) -> NodeType:
-        return NodeType.DoubleLiteral
 
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "value": self.value
-        }
-    
-class IdentifierLiteral(Expression):
-    def __init__(self, value: str) -> None:
-        self.value: str = value
-
-    def type(self) -> NodeType:
-        return NodeType.IdentifierLiteral
-
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "value": self.value
-        }
-    
 class BooleanLiteral(Expression):
     def __init__(self, value: bool) -> None:
-        self.value: bool = value
+        self.value = value
 
-    def type(self) -> NodeType:
-        return NodeType.BooleanLiteral
 
-    def json(self) -> dict:
-        return {
-            "type": self.type().value,
-            "value": self.value
-        }
+class StringLiteral(Expression):
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+class CharLiteral(Expression):
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+class NilLiteral(Expression):
+    pass
+
+
+class IdentifierLiteral(Expression):
+    def __init__(self, value: str) -> None:
+        self.value = value
 # endregion
