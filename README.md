@@ -24,19 +24,20 @@ See [SYNTAX.md](SYNTAX.md) for the whole language and [examples/](examples) for 
 
 ## Speed
 
-[bench/](bench) has 17 real AtCoder and Codeforces problems, each solved with the same algorithm in CPL and in C++ (g++ -O2, with the same fast I/O). All three builds are verified against brute force solutions before anything is timed. CPL is faster than or level with C++ on 27 of the 31 max-size tests:
+[bench/](bench) has 17 real AtCoder and Codeforces problems, each solved with the same algorithm in CPL and in C++ (g++ -O2, with the same fast I/O). All three builds are verified against brute force solutions before anything is timed. CPL is faster than C++ on 25 of the 31 max-size tests. Of the other 6, four are within 5% (run-to-run noise), and the lazy segment tree and Fenwick tree are 7–15% behind:
 
 | Problem | C++ | CPL |
 |---|---|---|
-| SCC, 5·10⁵ vertices, recursion 5·10⁵ deep | 83 ms | 41 ms |
-| Dijkstra with path, 10⁵ edges (long path) | 33 ms | 19 ms |
-| lazy segment tree, 5·10⁵ queries mod 998244353 | 832 ms | 717 ms |
-| suffix array + LCP, 5·10⁵ characters | 64 ms | 57 ms |
-| LCS DP, 3000 × 3000 | 21 ms | 18 ms |
-| NTT convolution, 2²⁰ | 214 ms | 218 ms |
-| 10⁴ test cases with a hash map each | 14 ms | 17 ms |
+| SCC, 5·10⁵ vertices, recursion 5·10⁵ deep | 87 ms | 41 ms |
+| rolling hashes of 10⁶ substrings, sorted | 97 ms | 60 ms |
+| Dijkstra with path, 10⁵ edges | 57 ms | 47 ms |
+| sorting + binary search, 3 × 10⁵ numbers | 38 ms | 30 ms |
+| suffix array + LCP, 5·10⁵ characters | 51 ms | 44 ms |
+| LCS DP, 3000 × 3000 | 23 ms | 18 ms |
+| 10⁴ test cases with a hash map each | 14 ms | 15 ms |
+| lazy segment tree, 5·10⁵ queries mod 998244353 | 863 ms | 993 ms |
 
-The full table, the rules and the reasons behind each difference are in [bench/README.md](bench/README.md). In short, CPL wins by never freeing memory, compiling its runtime into the program, and proving bounds checks away in loops. It loses where C++'s references save a lookup or where freeing memory matters.
+The full table, the rules and the reasons behind each difference are in [bench/README.md](bench/README.md). In short, CPL wins by bump allocation, radix sorting, compiling its runtime into the program, and proving bounds checks away in loops. It loses a little where bounds checks can't be proven away (recursive code like the lazy segment tree).
 
 ## Setup
 

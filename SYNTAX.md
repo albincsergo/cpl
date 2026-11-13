@@ -403,7 +403,8 @@ Struct variables are references: `_ q: Point = p.` makes `q` and `p` the same po
 
 CPL makes the trade-offs a short-lived program can afford and long-running software can't:
 
-- **Memory is never freed.** Everything comes from one bump allocator carved out of a huge address space reservation. Allocating is a pointer bump, new memory is already zeroed by the OS, and there's no `malloc` bookkeeping per object. This is why vectors of vectors and structs are several times faster than in C++. When the newest allocation is a vector or string that needs to grow, it grows in place without copying.
+- **Memory is almost never freed.** Everything comes from one bump allocator carved out of a huge address space reservation. Allocating is a pointer bump, new memory is already zeroed by the OS, and there's no `malloc` bookkeeping per object. This is why vectors of vectors and structs are several times faster than in C++. When the newest allocation is a vector or string that needs to grow, it grows in place without copying.
+- **Containers that can't be reached anymore are reused.** A `vec`, `map` or `pq` declared without an initializer (or with a fresh one like `vec<it>(n)`) is given back when its block ends, if the compiler can see that only that variable ever refers to it: it's only used as `x[i]`, `x.method(...)`, `for (e in x)` and `ou @@ x`, and never assigned, passed to a function, returned, swapped or stored anywhere. The next one declared reuses the memory, so a Codeforces style loop over test cases with a fresh map per test stays small and in cache. Buffers that vectors and maps outgrow are reused the same way.
 - **The stack is huge.** `mn` runs on a stack of a quarter of the machine's memory (up to 16 GB), so a recursive DFS ten million levels deep just works. Only the part that's used costs memory. A recursion that never stops ends with a stack overflow error instead of a crash.
 - **Big allocations use 2 MB pages** where the OS allows it, which makes random access into big arrays cheaper.
 
@@ -411,8 +412,9 @@ Under an address space limit (`ulimit -v`, which some judges use as the memory l
 
 The compiler also works hard on the loops competitive programs live in:
 
-- **Loop versioning.** In a `for (i in rng(a, b))` loop, every `v[i + E]` (where `E` doesn't change in the loop, like `dp[(i - 1) * w + j]` or `best[c - w]`) is checked against the vector's length once, before the loop. If they all fit, a copy of the loop without per-element bounds checks runs; otherwise the normal checked loop runs and reports the bad index. This needs the vector's length to stay fixed during the loop: no `pb`, `pp`, `clr` or `swap`, and no calls to your own functions inside it.
+- **Loop versioning.** In a `for (i in rng(a, b))` loop, and in C-style counting loops like `for (_ i: it = a. i < b. ++i)`, every `v[i + E]` (where `E` doesn't change in the loop, like `dp[(i - 1) * w + j]` or `best[c - w]`) is checked against the vector's length once, before the loop. If they all fit, a copy of the loop without per-element bounds checks runs; otherwise the normal checked loop runs and reports the bad index. This needs the vector's length to stay fixed during the loop: no `pb`, `pp`, `clr` or `swap`, and no calls to your own functions inside it.
 - **Branch-free `if`.** `if c { x = A. } else { x = B. }` (or without the `else`) compiles to a select instead of a jump when `A` and `B` have no side effects, no division and only indexes proven in bounds.
+- **Radix sort.** `v.srt()` on numbers uses a radix sort from a few hundred elements on, which is several times faster than a comparison sort like `std::sort`.
 - **Constants.** A global number that starts as a literal and is never assigned is a compile-time constant, like `const` in C++, so `% mod` with `_ mod: ll = 998244353.` compiles to a multiplication.
 - **The runtime is part of the program.** When clang is installed, the runtime is linked in as LLVM bitcode, so reading and printing numbers and indexing strings are inlined into the loops that use them.
 
