@@ -1,0 +1,4 @@
+f mn() {
+    _ m: map<it, it>.
+    ou @@ m.
+}

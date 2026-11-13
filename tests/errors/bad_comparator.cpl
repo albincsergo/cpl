@@ -1,0 +1,5 @@
+f before(a: ll, b: ll) -> bo { r a < b. }
+f mn() {
+    _ v: vec<it>.
+    v.srt(before).
+}

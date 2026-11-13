@@ -7,6 +7,7 @@ from AST import IdentifierLiteral, ShallStatement, FunctionStatement, ReturnStat
 from AST import IfStatement, BooleanLiteral, StringLiteral, CharLiteral, NilLiteral, PrefixExpression, CallExpression
 from AST import IndexExpression, MemberExpression, CastExpression, WhileStatement, ForStatement, BreakStatement
 from AST import ContinueStatement, InputStatement, OutputStatement, StructStatement, TypeExpression, Node
+from AST import ForEachStatement
 
 
 # precedence types
@@ -549,6 +550,10 @@ class Parser:
             return None
         self.nextToken()
 
+        # for (x in v) and for (i, x in v) loop over a vector, string, map or rng(...)
+        if self.currentTokenIs(TokenType.IDENTIFIER) and (self.peekTokenIs(TokenType.IN) or self.peekTokenIs(TokenType.COMMA)):
+            return self.parseForEachStatement()
+
         if not self.currentTokenIs(TokenType.DOT):
             statement.initializer = self.parseSimpleStatement(terminated=True)
             if statement.initializer is None:
@@ -565,6 +570,32 @@ class Parser:
             statement.step = self.parseSimpleStatement(terminated=False)
             if statement.step is None or not self.expectPeek(TokenType.RPAREN):
                 return None
+
+        if not self.expectPeek(TokenType.LBRACE):
+            return None
+
+        statement.body = self.parseBlockStatement()
+        if statement.body is None:
+            return None
+
+        return statement
+
+    def parseForEachStatement(self) -> ForEachStatement | None:
+        statement: ForEachStatement = ForEachStatement(names=[self.currentToken.literal])
+
+        if self.peekTokenIs(TokenType.COMMA):
+            self.nextToken()
+            if not self.expectPeek(TokenType.IDENTIFIER):
+                return None
+            statement.names.append(self.currentToken.literal)
+
+        if not self.expectPeek(TokenType.IN):
+            return None
+        self.nextToken()
+
+        statement.iterable = self.parseExpression(PrecedenceType.P_LOWEST)
+        if statement.iterable is None or not self.expectPeek(TokenType.RPAREN):
+            return None
 
         if not self.expectPeek(TokenType.LBRACE):
             return None

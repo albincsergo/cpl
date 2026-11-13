@@ -1,0 +1,26 @@
+// for-each loops over vectors, strings, maps and rng(), with brk, cont and pushing while looping
+f mn() {
+    _ v: vec<it>. v.pb(5). v.pb(7). v.pb(9).
+    for (x in v) { ou @@ x @@ ' '. }
+    for (i, x in v) { ou @@ i @@ '=' @@ x @@ ' '. if x == 7 { cont. } v.pb(0). if v.sz() > 5 { brk. } }
+    ou @@ el @@ v @@ el.
+    for (c in "hey") { ou @@ c @@ '-'. }
+    for (i, c in "ab") { ou @@ i @@ c. }
+    ou @@ el.
+    _ m: map<st, it>. m["b"] = 2. m["a"] = 1. m["c"] = 3.
+    for (k in m) { ou @@ k. }
+    for (k, val in m) { ou @@ ' ' @@ k @@ val. }
+    ou @@ el.
+    for (i in rng(5)) { ou @@ i. }
+    ou @@ ' '.
+    for (i in rng(2, 6)) { ou @@ i. }
+    ou @@ ' '.
+    for (i in rng(10, 0, -3)) { ou @@ i @@ ','. }
+    _ step: it = -2.
+    for (i in rng(ll(6), 0, step)) { ou @@ i @@ ';'. }
+    _ total: ll.
+    for (i in rng(1, 1000001)) { total += i. }
+    ou @@ ' ' @@ total @@ el.
+    for (x in v) { x = 100. }
+    ou @@ v @@ el.
+}

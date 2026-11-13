@@ -1,0 +1,41 @@
+// priority queues, binary search and stable comparator sorts on random data; the .out comes from Python
+_ seed: ull = 4242.
+f rnd(n: it) -> it {
+    seed ^^= seed << 13. seed ^^= seed >> 7. seed ^^= seed << 17.
+    r it(seed % ull(n)).
+}
+f byKey(a: pr<it, it>, b: pr<it, it>) -> bo { r a.f < b.f. }
+f mn() {
+    _ maxq: pq<ll>.
+    _ minq: minpq<pr<it, st>>.
+    _ checksum: ll.
+    for (step in rng(200000)) {
+        _ op: it = rnd(3).
+        if op < 2 {
+            maxq.ps(ll(rnd(1000000)) * 1000).
+            minq.ps(pr(rnd(100), st(rnd(50)))).
+        } else if !maxq.emp() {
+            checksum = checksum * 31 + maxq.tp() + minq.tp().f * 7 + minq.tp().s.sz().
+            maxq.pp().
+            minq.pp().
+        }
+    }
+    ou @@ maxq.sz() @@ ' ' @@ checksum @@ el.
+
+    _ v: vec<it>.
+    for (i in rng(5000)) { v.pb(rnd(3000) - 1500). }
+    v.srt().
+    _ answers: ll.
+    for (i in rng(5000)) {
+        _ x: it = rnd(3200) - 1600.
+        answers = answers * 131 + v.lb(x) * 3 + v.ub(x).
+    }
+    ou @@ answers @@ el.
+
+    _ items: vec<pr<it, it>>.
+    for (i in rng(3000)) { items.pb(pr(rnd(20), i)). }
+    items.srt(byKey).
+    _ order: ll.
+    for (item in items) { order = order * 7 + item.s. }
+    ou @@ order @@ el.
+}

@@ -730,9 +730,19 @@ void cpl_vec_clear(CplVec *v) { v->len = 0; }
 
 void cpl_vec_sort(CplVec *v, int32_t kind) { sortRaw(v->data, v->len, v->elemSize, kind); }
 
+// scratch memory for the compiler's generated sorts, which is freed again so repeated sorts
+// don't grow the arena
+void *cpl_temp_alloc(int64_t size) {
+    void *memory = malloc((size_t)(size > 0 ? size : 1));
+    if (memory == NULL) panic("out of memory");
+    return memory;
+}
+
+void cpl_temp_free(void *memory) { free(memory); }
+
 void cpl_vec_reverse(CplVec *v) {
-    char temporary[16];
     int64_t size = v->elemSize;
+    char *temporary = arenaAlloc((size_t)size);
     for (int64_t i = 0, j = v->len - 1; i < j; i++, j--) {
         memcpy(temporary, v->data + i * size, (size_t)size);
         memcpy(v->data + i * size, v->data + j * size, (size_t)size);

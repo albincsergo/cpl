@@ -1,0 +1,3 @@
+f mn() {
+    for (i, x in rng(5)) { }
+}

@@ -13,16 +13,24 @@ BYTE_POINTER: ir.PointerType = ir.IntType(8).as_pointer()
 class CType:
     # a CPL type: the language-level information (signedness, element types, ...) next to its LLVM type
     def __init__(self, kind: str, name: str, irType: ir.Type, bits: int = 0, signed: bool = False,
-                 elem: "CType" = None, key: "CType" = None, value: "CType" = None, struct: "StructInfo" = None) -> None:
+                 elem: "CType" = None, key: "CType" = None, value: "CType" = None, struct: "StructInfo" = None,
+                 first: "CType" = None, second: "CType" = None, minFirst: bool = False) -> None:
         self.kind = kind
         self.name = name
         self.irType = irType
         self.bits = bits
         self.signed = signed
+        # vec and pq elements
         self.elem = elem
+        # map keys and values
         self.key = key
         self.value = value
         self.struct = struct
+        # the two halves of a pair
+        self.first = first
+        self.second = second
+        # minpq instead of pq
+        self.minFirst = minFirst
 
     def __str__(self) -> str:
         return self.name
@@ -38,6 +46,10 @@ class CType:
                 return self.elem == other.elem
             case "map":
                 return self.key == other.key and self.value == other.value
+            case "pair":
+                return self.first == other.first and self.second == other.second
+            case "pq":
+                return self.minFirst == other.minFirst and self.elem == other.elem
         return self.name == other.name
 
     def __hash__(self) -> int:
@@ -54,7 +66,24 @@ class CType:
 
     @property
     def isReference(self) -> bool:
-        return self.kind in ["string", "vec", "map", "struct"]
+        return self.kind in ["string", "vec", "map", "struct", "pq"]
+
+    @property
+    def isContainer(self) -> bool:
+        # needs a real object as its default value, not zeroed memory
+        return self.kind in ["vec", "map", "struct", "pq"]
+
+    @property
+    def isOrderable(self) -> bool:
+        # has <, so it can be sorted, binary searched and kept in a priority queue
+        if self.kind == "pair":
+            return self.first.isOrderable and self.second.isOrderable
+        return self.kind in ["int", "char", "float", "bool", "string"]
+
+    @property
+    def isPackableKey(self) -> bool:
+        # small enough to be packed into a 64-bit map key together with another one
+        return self.kind in ["int", "char", "bool"] and self.bits <= 32
 
     @property
     def sortKind(self) -> int | None:

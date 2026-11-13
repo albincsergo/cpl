@@ -13,6 +13,7 @@ from AST import Program
 from Compiler import Compiler
 from Lexer import Lexer
 from Parser import Parser
+from Target import initializeLLVM, targetMachine
 
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
@@ -41,26 +42,11 @@ def compileProgram(program: Program) -> ir.Module:
     if compiler.errors:
         raise CompileFailure(compiler.errors)
 
-    compiler.module.triple = llvm.get_default_triple()
     return compiler.module
 
 
 def compileSource(source: str) -> ir.Module:
     return compileProgram(parse(source))
-
-
-def initializeLLVM() -> None:
-    # newer llvmlite versions initialize LLVM automatically and raise if this is called
-    try:
-        llvm.initialize()
-    except RuntimeError:
-        pass
-    llvm.initialize_native_target()
-    llvm.initialize_native_asmprinter()
-
-
-def targetMachine(optLevel: int) -> llvm.TargetMachine:
-    return llvm.Target.from_default_triple().create_target_machine(opt=optLevel, reloc="pic", codemodel="default")
 
 
 def optimize(module: ir.Module, optLevel: int) -> llvm.ModuleRef:

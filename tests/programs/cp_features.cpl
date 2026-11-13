@@ -1,0 +1,26 @@
+// sorting with comparators, binary search, priority queues and swap
+struct Job { name: st. time: it. }
+f byTime(a: Job, b: Job) -> bo { r a.time < b.time. }
+f desc(a: it, b: it) -> bo { r a > b. }
+f mn() {
+    _ v: vec<it>. for (x in rng(10)) { v.pb((x * 7) % 10). }
+    v.srt(desc). ou @@ v @@ el.
+    v.srt(). ou @@ v @@ ' ' @@ v.lb(4) @@ v.ub(4) @@ v.lb(-1) @@ v.lb(100) @@ el.
+    _ jobs: vec<Job>.
+    jobs.pb(Job("c", 3)). jobs.pb(Job("a", 1)). jobs.pb(Job("b", 3)). jobs.pb(Job("d", 0)).
+    jobs.srt(byTime).
+    for (j in jobs) { ou @@ j.name @@ j.time @@ ' '. }
+    ou @@ el.
+    _ ps: vec<pr<it, st>>. ps.pb(pr(2, "x")). ps.pb(pr(1, "z")). ps.pb(pr(2, "a")). ps.pb(pr(1, "y")).
+    ps.srt(). ou @@ ps @@ " | " @@ ps.lb(pr(2, "b")) @@ el.
+    _ q: pq<it>. _ mq: minpq<pr<ll, it>>.
+    for (x in rng(20)) { q.ps((x * 13) % 20). mq.ps(pr(ll((x * 7) % 5), x)). }
+    while !q.emp() { ou @@ q.tp() @@ ' '. q.pp(). }
+    ou @@ el.
+    for (i in rng(5)) { ou @@ mq.tp() @@ ", ". mq.pop(). }
+    ou @@ mq.sz() @@ el.
+    _ a: it = 1. _ b: it = 2. swap(a, b).
+    _ m: map<it, st>. m[1] = "one". swap(m[1], m[2]).
+    _ w: vec<st> = vec<st>(2). w[0] = "p". swap(w[0], w[1]).
+    ou @@ a @@ b @@ ' ' @@ m[1] @@ '/' @@ m[2] @@ ' ' @@ w[0] @@ '/' @@ w[1] @@ el.
+}

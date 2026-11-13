@@ -1,4 +1,5 @@
 from llvmlite import ir
+import llvmlite.binding as llvm
 
 from AST import (
     AssignStatement,
@@ -28,8 +29,9 @@ from AST import (
     WhileStatement,
 )
 from Environment import Environment
+from Target import targetMachine
 from Types import (
-    BO, BYTE_POINTER, CH, DU, IT, LL, NIL, PRIMITIVES, ST, ULL, VO,
+    BO, BYTE_POINTER, CH, DU, IT, LL, NIL, PRIMITIVES, SORT_UNSIGNED, ST, ULL, VO,
     CType, StructInfo, integerFor,
 )
 
@@ -47,6 +49,7 @@ COMPARISON_OPERATORS: list[str] = ["==", "!=", "<", ">", "<=", ">="]
 METHOD_ALIASES: dict[str, str] = {
     "push_back": "pb", "pop_back": "pp", "size": "sz", "back": "bk", "clear": "clr", "sort": "srt",
     "reverse": "rev", "empty": "emp", "substr": "sub", "count": "has", "contains": "has", "erase": "del",
+    "push": "ps", "top": "tp", "pop": "pp", "lower_bound": "lb", "upper_bound": "ub",
 }
 
 MAX_ERRORS: int = 20
@@ -85,6 +88,12 @@ class Compiler:
     def __init__(self) -> None:
         # a fresh context per program, so struct names from one compile never clash with the next
         self.module: ir.Module = ir.Module("main", context=ir.Context())
+        # the real layout of this machine, so sizes computed here match what LLVM generates
+        machine: llvm.TargetMachine = targetMachine()
+        self.targetData: llvm.TargetData = machine.target_data
+        self.module.triple = machine.triple
+        self.module.data_layout = str(self.targetData)
+        self.typeSizes: dict[str, int] = {}
 
         # CplVec { len, cap, elemSize, data } - the layout from the runtime
         self.vecStruct: ir.IdentifiedStructType = self.module.context.get_identified_type("CplVec")
@@ -112,6 +121,9 @@ class Compiler:
         self.tbaaRoot = self.module.add_metadata(["cpl alias classes"])
         self.tbaaTags: dict[str, ir.Value] = {}
         self.pointerTags: dict[ir.Value, str] = {}
+        self.mapSlotCount: int = 0
+        # generated functions: comparators for sorting, heap operations for priority queues
+        self.helpers: dict[str, ir.Function] = {}
 
         # temporary error collection used by main.py
         self.errors: list[str] = []
@@ -325,16 +337,53 @@ class Compiler:
             value: CType | None = self.resolveType(arguments[1])
             if key is None or value is None:
                 return None
-            if key.kind not in ["int", "char", "bool", "float", "string"]:
-                self.error(f"map keys must be numbers, characters, booleans or strings, not {key}", typeExpression)
+            packablePair: bool = key.kind == "pair" and key.first.isPackableKey and key.second.isPackableKey
+            if key.kind not in ["int", "char", "bool", "float", "string"] and not packablePair:
+                self.error(f"map keys must be numbers, characters, booleans, strings or pairs of 32-bit integers, not {key}", typeExpression)
                 return None
             if value.kind == "void":
                 self.error("a map can't hold vo", typeExpression)
                 return None
             return self.mapType(key, value)
 
+        if name == "pr":
+            if len(arguments) != 2 or not all(isinstance(argument, TypeExpression) for argument in arguments):
+                self.error(f"expected pr<first type, second type> but found {typeExpression}", typeExpression)
+                return None
+            first: CType | None = self.resolveType(arguments[0])
+            second: CType | None = self.resolveType(arguments[1])
+            if first is None or second is None:
+                return None
+            return self.pairType(first, second, typeExpression)
+
+        if name in ["pq", "minpq"]:
+            if len(arguments) != 1 or not isinstance(arguments[0], TypeExpression):
+                self.error(f"expected {name}<type> but found {typeExpression}", typeExpression)
+                return None
+            elem = self.resolveType(arguments[0])
+            if elem is None:
+                return None
+            if not elem.isOrderable:
+                self.error(f"a {name} needs elements that can be compared with <, like numbers, strings or pairs, not {elem}", typeExpression)
+                return None
+            return self.pqType(elem, minFirst=name == "minpq")
+
         self.error(f"unknown type '{name}'", typeExpression)
         return None
+
+    def pairType(self, first: CType, second: CType, node: Node | TypeExpression | None) -> CType | None:
+        for half in [first, second]:
+            if half.kind in ["void", "nil"] or half.isContainer and half.kind != "struct":
+                self.error(f"a pair can hold numbers, characters, booleans, strings, structs and pairs, not {half}", node)
+                return None
+        return CType("pair", f"pr<{first}, {second}>", ir.LiteralStructType([first.irType, second.irType]), first=first, second=second)
+
+    def pqType(self, elem: CType, minFirst: bool) -> CType:
+        return CType("pq", f"{'minpq' if minFirst else 'pq'}<{elem}>", self.vecPointer, elem=elem, minFirst=minFirst)
+
+    def mapKeyKind(self, key: CType) -> int:
+        # pairs are packed into an unsigned 64-bit number that sorts in the same order
+        return SORT_UNSIGNED if key.kind == "pair" else key.sortKind
 
     def vecType(self, elem: CType) -> CType:
         return CType("vec", f"vec<{elem}>", self.vecPointer, elem=elem)
@@ -413,6 +462,7 @@ class Compiler:
             "cpl_ipow": (I64, [I64, I64]),
             "cpl_vec_new": (vec, [I64, I64]), "cpl_vec_grow": (VOID, [vec]), "cpl_vec_pop": (VOID, [vec]),
             "cpl_vec_clear": (VOID, [vec]), "cpl_vec_sort": (VOID, [vec, I32]), "cpl_vec_reverse": (VOID, [vec]),
+            "cpl_temp_alloc": (BYTE_POINTER, [I64]), "cpl_temp_free": (VOID, [BYTE_POINTER]),
             "cpl_map_new": (BYTE_POINTER, [I32]), "cpl_map_at": (BYTE_POINTER, [BYTE_POINTER, I64, I8.as_pointer()]),
             "cpl_map_has": (I8, [BYTE_POINTER, I64]), "cpl_map_del": (VOID, [BYTE_POINTER, I64]),
             "cpl_map_size": (I64, [BYTE_POINTER]), "cpl_map_keys": (vec, [BYTE_POINTER, I64]),
@@ -433,6 +483,166 @@ class Compiler:
             functionType: ir.FunctionType = ir.FunctionType(DOUBLE, [DOUBLE] * argumentCount)
             self.intrinsics[fullName] = ir.Function(self.module, functionType, name=fullName)
         return self.intrinsics[fullName]
+
+    def helperFunction(self, name: str, functionType: ir.FunctionType, generate: callable) -> ir.Function:
+        # builds a small internal function once, without disturbing the function being compiled
+        if name in self.helpers:
+            return self.helpers[name]
+        function: ir.Function = ir.Function(self.module, functionType, name=name)
+        function.linkage = "internal"
+        self.helpers[name] = function
+
+        saved = (self.builder, self.allocaBuilder, getattr(self, "bodyBlock", None), self.environment, self.loops)
+        self.startFunction(function)
+        self.loops = []
+        generate(function)
+        self.finishFunction()
+        self.builder, self.allocaBuilder, self.bodyBlock, self.environment, self.loops = saved
+        return function
+
+    def lessThan(self, a: TypedValue, b: TypedValue, node: Node) -> ir.Value:
+        result: TypedValue | None = self.binaryOperation("<", a, b, node)
+        if result is None:
+            raise CompileError()
+        return result.value
+
+    def sortFunction(self, elem: CType, node: Node, comparator: "FunctionInfo | None" = None) -> ir.Function:
+        # a stable merge sort generated for one element type and order, so comparisons get inlined:
+        # sort(T* data, T* scratch, i64 count), where scratch has room for count / 2 + 1 elements
+        def less(a: ir.Value, b: ir.Value) -> ir.Value:
+            if comparator is not None:
+                return self.builder.call(comparator.irFunction, [a, b])
+            return self.lessThan(TypedValue(a, elem), TypedValue(b, elem), node)
+
+        def generate(function: ir.Function) -> None:
+            data, scratch, count = function.args
+            builder: ir.IRBuilder = self.builder
+            one: ir.Constant = ir.Constant(I64, 1)
+
+            def at(base: ir.Value, index: ir.Value) -> ir.Value:
+                return builder.gep(base, [index], inbounds=True)
+
+            def counter(name: str, start: ir.Value) -> ir.Value:
+                variable: ir.Value = self.allocate(I64, name)
+                builder.store(start, variable)
+                return variable
+
+            def loop(name: str, condition: callable, body: callable) -> None:
+                conditionBlock: ir.Block = function.append_basic_block(f"{name}_condition")
+                bodyBlock: ir.Block = function.append_basic_block(f"{name}_body")
+                endBlock: ir.Block = function.append_basic_block(f"{name}_end")
+                builder.branch(conditionBlock)
+                builder.position_at_end(conditionBlock)
+                builder.cbranch(condition(), bodyBlock, endBlock)
+                builder.position_at_end(bodyBlock)
+                body()
+                builder.branch(conditionBlock)
+                builder.position_at_end(endBlock)
+
+            # short runs: insertion sort, which is stable and fast on a handful of elements
+            smallBlock: ir.Block = function.append_basic_block("small")
+            largeBlock: ir.Block = function.append_basic_block("large")
+            builder.cbranch(builder.icmp_signed("<=", count, ir.Constant(I64, 16)), smallBlock, largeBlock)
+
+            builder.position_at_end(smallBlock)
+            i: ir.Value = counter("i", one)
+            j: ir.Value = counter("j", one)
+            item: ir.Value = self.allocate(elem.irType, "item")
+
+            def insertOne() -> None:
+                index: ir.Value = builder.load(i)
+                builder.store(builder.load(at(data, index)), item)
+                builder.store(builder.sub(index, one), j)
+
+                def shiftCondition() -> ir.Value:
+                    # j >= 0 && item < data[j], without reading data[-1]
+                    position: ir.Value = builder.load(j)
+                    inRange: ir.Value = builder.icmp_signed(">=", position, ir.Constant(I64, 0))
+                    safe: ir.Value = builder.select(inRange, position, ir.Constant(I64, 0))
+                    return builder.and_(inRange, less(builder.load(item), builder.load(at(data, safe))))
+
+                def shift() -> None:
+                    position: ir.Value = builder.load(j)
+                    builder.store(builder.load(at(data, position)), at(data, builder.add(position, one)))
+                    builder.store(builder.sub(position, one), j)
+
+                loop("shift", shiftCondition, shift)
+                builder.store(builder.load(item), at(data, builder.add(builder.load(j), one)))
+                builder.store(builder.add(index, one), i)
+
+            loop("insert", lambda: builder.icmp_signed("<", builder.load(i), count), insertOne)
+            builder.ret_void()
+
+            # long runs: sort both halves, then merge them through the scratch space
+            builder.position_at_end(largeBlock)
+            half: ir.Value = builder.lshr(count, one)
+            builder.call(function, [data, scratch, half])
+            builder.call(function, [at(data, half), scratch, builder.sub(count, half)])
+
+            mergeBlock: ir.Block = function.append_basic_block("merge")
+            doneBlock: ir.Block = function.append_basic_block("done")
+            # already in order: nothing to merge
+            outOfOrder: ir.Value = less(builder.load(at(data, half)), builder.load(at(data, builder.sub(half, one))))
+            builder.cbranch(outOfOrder, mergeBlock, doneBlock)
+
+            builder.position_at_end(mergeBlock)
+            copyIndex: ir.Value = counter("c", ir.Constant(I64, 0))
+
+            def copyOne() -> None:
+                index: ir.Value = builder.load(copyIndex)
+                builder.store(builder.load(at(data, index)), at(scratch, index))
+                builder.store(builder.add(index, one), copyIndex)
+
+            loop("copy", lambda: builder.icmp_signed("<", builder.load(copyIndex), half), copyOne)
+
+            left: ir.Value = counter("left", ir.Constant(I64, 0))
+            right: ir.Value = counter("right", half)
+            out: ir.Value = counter("out", ir.Constant(I64, 0))
+
+            def mergeCondition() -> ir.Value:
+                return builder.and_(builder.icmp_signed("<", builder.load(left), half), builder.icmp_signed("<", builder.load(right), count))
+
+            def mergeOne() -> None:
+                leftIndex: ir.Value = builder.load(left)
+                rightIndex: ir.Value = builder.load(right)
+                leftValue: ir.Value = builder.load(at(scratch, leftIndex))
+                rightValue: ir.Value = builder.load(at(data, rightIndex))
+                # take from the right only when it is strictly smaller, which keeps equal elements in order
+                takeRight: ir.Value = less(rightValue, leftValue)
+                builder.store(builder.select(takeRight, rightValue, leftValue), at(data, builder.load(out)))
+                builder.store(builder.add(builder.load(out), one), out)
+                builder.store(builder.select(takeRight, builder.add(rightIndex, one), rightIndex), right)
+                builder.store(builder.select(takeRight, leftIndex, builder.add(leftIndex, one)), left)
+
+            loop("merge", mergeCondition, mergeOne)
+
+            def restOne() -> None:
+                leftIndex: ir.Value = builder.load(left)
+                builder.store(builder.load(at(scratch, leftIndex)), at(data, builder.load(out)))
+                builder.store(builder.add(builder.load(out), one), out)
+                builder.store(builder.add(leftIndex, one), left)
+
+            loop("rest", lambda: builder.icmp_signed("<", builder.load(left), half), restOne)
+            builder.branch(doneBlock)
+
+            builder.position_at_end(doneBlock)
+            builder.ret_void()
+
+        pointerType: ir.PointerType = elem.irType.as_pointer()
+        name: str = f"cpl.sort.{comparator.name}" if comparator is not None else f"cpl.sort.{elem}"
+        return self.helperFunction(name, ir.FunctionType(VOID, [pointerType, pointerType, I64]), generate)
+
+    def sortVec(self, vec: ir.Value, elem: CType, node: Node, comparator: "FunctionInfo | None" = None) -> None:
+        count: ir.Value = self.vecLength(vec)
+        with self.builder.if_then(self.builder.icmp_signed(">", count, ir.Constant(I64, 1))):
+            # the scratch space is malloc'd and freed: sorting in a loop shouldn't grow the arena
+            halfPlusOne: ir.Value = self.builder.add(self.builder.lshr(count, ir.Constant(I64, 1)), ir.Constant(I64, 1))
+            bytes: ir.Value = self.builder.mul(halfPlusOne, ir.Constant(I64, self.elementSize(elem)))
+            scratch: ir.Value = self.callRuntime("cpl_temp_alloc", [bytes])
+            pointerType: ir.PointerType = elem.irType.as_pointer()
+            self.builder.call(self.sortFunction(elem, node, comparator),
+                              [self.vecData(vec, elem), self.builder.bitcast(scratch, pointerType), count])
+            self.callRuntime("cpl_temp_free", [scratch])
 
     def callRuntime(self, name: str, arguments: list[ir.Value]) -> ir.Value:
         return self.builder.call(self.runtime(name), arguments)
@@ -464,6 +674,8 @@ class Compiler:
                 self.visitWhileStatement(node)
             case NodeType.ForStatement:
                 self.visitForStatement(node)
+            case NodeType.ForEachStatement:
+                self.visitForEachStatement(node)
             case NodeType.BreakStatement | NodeType.ContinueStatement:
                 self.visitJumpStatement(node)
             case NodeType.InputStatement:
@@ -674,6 +886,164 @@ class Compiler:
         self.finishLoop(endBlock, loop, node.condition)
         self.environment = previousEnvironment
 
+    def visitForEachStatement(self, node) -> None:
+        if len(node.names) == 2 and node.names[0] == node.names[1]:
+            self.error(f"the two loop variables can't both be called '{node.names[0]}'", node)
+            return
+
+        previousEnvironment: Environment = self.environment
+        self.environment = Environment(parent=previousEnvironment, name="for")
+        try:
+            iterable: Expression = node.iterable
+            isRange: bool = (iterable.type() == NodeType.CallExpression and iterable.function.type() == NodeType.IdentifierLiteral
+                             and iterable.function.value == "rng" and "rng" not in self.functions)
+            if isRange:
+                self.rangeLoop(node)
+            else:
+                self.collectionLoop(node)
+        except CompileError:
+            pass
+        self.environment = previousEnvironment
+
+    def loopVariable(self, name: str, ctype: CType) -> ir.Value:
+        pointer: ir.Value = self.allocate(ctype.irType, name)
+        self.environment.define(name, pointer, ctype)
+        return pointer
+
+    def rangeLoop(self, node) -> None:
+        # rng(end), rng(start, end), rng(start, end, step): like Python's range, without building a vector
+        arguments: list[Expression] = node.iterable.arguments
+        if not 1 <= len(arguments) <= 3:
+            self.error(f"rng() takes an end, a start and an end, or a start, an end and a step, not {len(arguments)} values", node.iterable)
+            raise CompileError()
+        if len(node.names) != 1:
+            self.error("a loop over rng() has one variable: for (i in rng(n))", node)
+            raise CompileError()
+
+        values: list[TypedValue] = []
+        for argument in arguments:
+            resolved: TypedValue | None = self.visitExpression(argument)
+            if resolved is None:
+                raise CompileError()
+            if not resolved.ctype.isInteger:
+                self.error(f"rng() counts with integers, not {resolved.ctype}", argument)
+                raise CompileError()
+            values.append(resolved)
+
+        counterType: CType = IT
+        for value in values:
+            counterType = self.commonNumericType(counterType, value.ctype)
+        converted: list[ir.Value] = [self.convert(value, counterType, node, "", explicit=True) for value in values]
+        zero: ir.Constant = ir.Constant(counterType.irType, 0)
+        start, end, step = (zero, converted[0], ir.Constant(counterType.irType, 1)) if len(converted) == 1 else (
+            converted[0], converted[1], converted[2] if len(converted) == 3 else ir.Constant(counterType.irType, 1))
+
+        counter: ir.Value = self.allocate(counterType.irType, "counter")
+        self.builder.store(start, counter)
+        variable: ir.Value = self.loopVariable(node.names[0], counterType)
+
+        compare = self.builder.icmp_signed if counterType.signed else self.builder.icmp_unsigned
+        stepIsLiteral: bool = len(arguments) < 3 or arguments[2].type() == NodeType.IntegerLiteral or (
+            arguments[2].type() == NodeType.PrefixExpression and arguments[2].operator == "-" and arguments[2].rightNode.type() == NodeType.IntegerLiteral)
+
+        def condition() -> ir.Value:
+            current: ir.Value = self.builder.load(counter)
+            if stepIsLiteral:
+                negative: bool = len(arguments) == 3 and arguments[2].type() == NodeType.PrefixExpression
+                return compare(">" if negative else "<", current, end)
+            # the direction depends on the sign of the step
+            goingUp: ir.Value = self.builder.icmp_signed(">", step, zero)
+            return self.builder.select(goingUp, compare("<", current, end), compare(">", current, end))
+
+        def bodyStart() -> None:
+            self.builder.store(self.builder.load(counter), variable)
+
+        def advance() -> None:
+            self.builder.store(self.builder.add(self.builder.load(counter), step), counter)
+
+        self.emitLoop(condition, bodyStart, advance, node.body)
+
+    def collectionLoop(self, node) -> None:
+        collection: TypedValue | None = self.visitExpression(node.iterable)
+        if collection is None:
+            raise CompileError()
+        ctype: CType = collection.ctype
+
+        if ctype.kind == "map":
+            # loops over a snapshot of the keys, in sorted order; the second variable is the value
+            keys: TypedValue = mapKeys(self, collection, node)
+            keyVariable: ir.Value = self.loopVariable(node.names[0], ctype.key)
+            valueVariable: ir.Value | None = self.loopVariable(node.names[1], ctype.value) if len(node.names) == 2 else None
+            index: ir.Value = self.allocate(I64, "index")
+            self.builder.store(ir.Constant(I64, 0), index)
+
+            def mapBodyStart() -> None:
+                key: ir.Value = self.load(self.vecSlot(keys.value, ctype.key, self.builder.load(index)))
+                self.builder.store(key, keyVariable)
+                if valueVariable is not None:
+                    slot: ir.Value = self.mapSlot(collection.value, ctype, TypedValue(key, ctype.key), node)
+                    self.builder.store(self.builder.load(slot), valueVariable)
+
+            self.emitLoop(lambda: self.builder.icmp_signed("<", self.builder.load(index), self.vecLength(keys.value)),
+                          mapBodyStart, lambda: self.builder.store(self.builder.add(self.builder.load(index), ir.Constant(I64, 1)), index),
+                          node.body)
+            return
+
+        if ctype.kind not in ["vec", "string"]:
+            self.error(f"can't loop over a {ctype}; loops work on vectors, strings, maps and rng(...)", node.iterable)
+            raise CompileError()
+
+        # the second variable is the element, the first one its index
+        elem: CType = ctype.elem if ctype.kind == "vec" else CH
+        indexVariable: ir.Value | None = self.loopVariable(node.names[0], LL) if len(node.names) == 2 else None
+        elemVariable: ir.Value = self.loopVariable(node.names[-1], elem)
+        index = self.allocate(I64, "index")
+        self.builder.store(ir.Constant(I64, 0), index)
+
+        def length() -> ir.Value:
+            # read again every time around, so pushing inside the loop is safe
+            if ctype.kind == "vec":
+                return self.vecLength(collection.value)
+            return self.callRuntime("cpl_str_len", [collection.value])
+
+        def bodyStart() -> None:
+            current: ir.Value = self.builder.load(index)
+            if indexVariable is not None:
+                self.builder.store(current, indexVariable)
+            if ctype.kind == "vec":
+                element: ir.Value = self.load(self.vecSlot(collection.value, elem, current))
+            else:
+                element = self.callRuntime("cpl_str_at", [collection.value, current])
+            self.builder.store(element, elemVariable)
+
+        self.emitLoop(lambda: self.builder.icmp_signed("<", self.builder.load(index), length()), bodyStart,
+                      lambda: self.builder.store(self.builder.add(self.builder.load(index), ir.Constant(I64, 1)), index), node.body)
+
+    def emitLoop(self, condition: callable, bodyStart: callable, advance: callable, body: BlockStatement) -> None:
+        function: ir.Function = self.builder.function
+        conditionBlock: ir.Block = function.append_basic_block("each_condition")
+        bodyBlock: ir.Block = function.append_basic_block("each_body")
+        stepBlock: ir.Block = function.append_basic_block("each_step")
+        endBlock: ir.Block = function.append_basic_block("each_end")
+
+        self.builder.branch(conditionBlock)
+        self.builder.position_at_end(conditionBlock)
+        self.builder.cbranch(condition(), bodyBlock, endBlock)
+
+        self.builder.position_at_end(bodyBlock)
+        bodyStart()
+        loop: LoopContext = LoopContext(endBlock, stepBlock)
+        self.loops.append(loop)
+        self.visitScopedBlock(body)
+        self.loops.pop()
+        if not self.currentBlockTerminated():
+            self.builder.branch(stepBlock)
+
+        self.builder.position_at_end(stepBlock)
+        advance()
+        self.builder.branch(conditionBlock)
+        self.builder.position_at_end(endBlock)
+
     def finishLoop(self, endBlock: ir.Block, loop: LoopContext, condition: Expression | None) -> None:
         self.builder.position_at_end(endBlock)
         # 'while true' without a break never gets here, which matters for the missing return check
@@ -709,52 +1079,87 @@ class Compiler:
             if target is None:
                 continue
             pointer, ctype = target
+            if not self.isReadable(ctype):
+                self.error(f"can't read a {ctype} from the input; read its elements one by one", targetNode)
+                continue
+            self.readInto(pointer, ctype)
 
-            value: ir.Value
-            match ctype.kind:
-                case "int":
-                    raw: ir.Value = self.callRuntime("cpl_read_i64" if ctype.signed else "cpl_read_u64", [])
-                    value = raw if ctype.bits == 64 else self.builder.trunc(raw, ctype.irType)
-                case "char":
-                    value = self.callRuntime("cpl_read_char", [])
-                case "float":
-                    value = self.callRuntime("cpl_read_f64", [])
-                case "bool":
-                    value = self.builder.icmp_unsigned("!=", self.callRuntime("cpl_read_bool", []), ir.Constant(I8, 0))
-                case "string":
-                    value = self.callRuntime("cpl_read_str", [])
-                case _:
-                    self.error(f"can't read a {ctype} from the input; read its elements one by one", targetNode)
-                    continue
+    def isReadable(self, ctype: CType) -> bool:
+        if ctype.kind == "pair":
+            return self.isReadable(ctype.first) and self.isReadable(ctype.second)
+        return ctype.kind in ["int", "char", "float", "bool", "string"]
 
-            self.store(value, pointer)
+    def readInto(self, pointer: ir.Value, ctype: CType) -> None:
+        value: ir.Value
+        match ctype.kind:
+            case "pair":
+                # a pair reads its two halves, one after the other
+                for index, half in enumerate([ctype.first, ctype.second]):
+                    self.readInto(self.builder.gep(pointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True), half)
+                return
+            case "int":
+                raw: ir.Value = self.callRuntime("cpl_read_i64" if ctype.signed else "cpl_read_u64", [])
+                value = raw if ctype.bits == 64 else self.builder.trunc(raw, ctype.irType)
+            case "char":
+                value = self.callRuntime("cpl_read_char", [])
+            case "float":
+                value = self.callRuntime("cpl_read_f64", [])
+            case "bool":
+                value = self.builder.icmp_unsigned("!=", self.callRuntime("cpl_read_bool", []), ir.Constant(I8, 0))
+            case _:
+                value = self.callRuntime("cpl_read_str", [])
+        self.store(value, pointer)
 
     def visitOutputStatement(self, node: OutputStatement) -> None:
         for valueNode in node.values:
             resolved: TypedValue | None = self.visitExpression(valueNode)
             if resolved is None:
                 continue
-            value: ir.Value = resolved.value
-            ctype: CType = resolved.ctype
+            if not self.isPrintable(resolved.ctype):
+                self.error(f"can't print a {resolved.ctype}; print its parts one by one", valueNode)
+                continue
+            self.printValue(resolved)
 
-            match ctype.kind:
-                case "int":
-                    if ctype.signed:
-                        wide: ir.Value = value if ctype.bits == 64 else self.builder.sext(value, I64)
-                        self.callRuntime("cpl_print_i64", [wide])
-                    else:
-                        wide = value if ctype.bits == 64 else self.builder.zext(value, I64)
-                        self.callRuntime("cpl_print_u64", [wide])
-                case "char":
-                    self.callRuntime("cpl_print_char", [value])
-                case "float":
-                    self.callRuntime("cpl_print_f64", [value])
-                case "bool":
-                    self.callRuntime("cpl_print_bool", [self.builder.zext(value, I8)])
-                case "string":
-                    self.callRuntime("cpl_print_str", [value])
-                case _:
-                    self.error(f"can't print a {ctype}; print its parts one by one", valueNode)
+    def isPrintable(self, ctype: CType) -> bool:
+        if ctype.kind == "pair":
+            return self.isPrintable(ctype.first) and self.isPrintable(ctype.second)
+        if ctype.kind == "vec":
+            # vectors print their elements separated by spaces, but only one level deep
+            return ctype.elem.kind != "vec" and self.isPrintable(ctype.elem)
+        return ctype.kind in ["int", "char", "float", "bool", "string"]
+
+    def printValue(self, resolved: TypedValue) -> None:
+        value: ir.Value = resolved.value
+        ctype: CType = resolved.ctype
+        space: ir.Constant = ir.Constant(I8, ord(" "))
+
+        match ctype.kind:
+            case "pair":
+                first, second = self.pairHalves(resolved)
+                self.printValue(first)
+                self.callRuntime("cpl_print_char", [space])
+                self.printValue(second)
+            case "vec":
+                def printElement(index: ir.Value) -> None:
+                    with self.builder.if_then(self.builder.icmp_signed(">", index, ir.Constant(I64, 0))):
+                        self.callRuntime("cpl_print_char", [space])
+                    self.printValue(TypedValue(self.load(self.vecSlot(value, ctype.elem, index)), ctype.elem))
+                self.countedLoop(self.vecLength(value), printElement)
+            case "int":
+                if ctype.signed:
+                    wide: ir.Value = value if ctype.bits == 64 else self.builder.sext(value, I64)
+                    self.callRuntime("cpl_print_i64", [wide])
+                else:
+                    wide = value if ctype.bits == 64 else self.builder.zext(value, I64)
+                    self.callRuntime("cpl_print_u64", [wide])
+            case "char":
+                self.callRuntime("cpl_print_char", [value])
+            case "float":
+                self.callRuntime("cpl_print_f64", [value])
+            case "bool":
+                self.callRuntime("cpl_print_bool", [self.builder.zext(value, I8)])
+            case "string":
+                self.callRuntime("cpl_print_str", [value])
     # endregion
 
     # region expressions
@@ -930,6 +1335,9 @@ class Compiler:
         if leftType.kind == "string" or rightType.kind == "string":
             return self.stringOperation(operator, left, right, node)
 
+        if leftType.kind == "pair" or rightType.kind == "pair":
+            return self.pairComparison(operator, left, right, node)
+
         # structs can only be compared with each other or nil
         if leftType.kind in ["struct", "nil"] or rightType.kind in ["struct", "nil"]:
             bothPointers: bool = leftType.kind in ["struct", "nil"] and rightType.kind in ["struct", "nil"]
@@ -944,7 +1352,8 @@ class Compiler:
         if leftType.kind == "bool" or rightType.kind == "bool":
             if leftType.kind == "bool" and rightType.kind == "bool":
                 match operator:
-                    case "==" | "!=":
+                    case "==" | "!=" | "<" | ">" | "<=" | ">=":
+                        # false < true, so booleans can be sorted and kept in pairs
                         return TypedValue(self.builder.icmp_unsigned(operator, left.value, right.value), BO)
                     case "&":
                         return TypedValue(self.builder.and_(left.value, right.value), BO)
@@ -1027,6 +1436,49 @@ class Compiler:
 
         self.error(f"unknown operator {operator}", node)
         return None
+
+    def pairComparison(self, operator: str, left: TypedValue, right: TypedValue, node: Node) -> TypedValue | None:
+        # pairs compare like tuples: by the first half, then by the second
+        if left.ctype.kind != "pair" or right.ctype.kind != "pair" or operator not in COMPARISON_OPERATORS:
+            self.error(f"operator {operator} doesn't work on {left.ctype} and {right.ctype}", node)
+            return None
+
+        if left.ctype != right.ctype:
+            errorCount: int = len(self.errors)
+            converted: ir.Value | None = self.convert(right, left.ctype, node, "")
+            if converted is not None:
+                right = TypedValue(converted, left.ctype)
+            else:
+                del self.errors[errorCount:]
+                converted = self.convert(left, right.ctype, node, "")
+                if converted is None:
+                    del self.errors[errorCount:]
+                    self.error(f"can't compare {left.ctype} with {right.ctype}", node)
+                    return None
+                left = TypedValue(converted, right.ctype)
+
+        if operator in [">", "<="]:
+            left, right = right, left
+            operator = "<" if operator == ">" else ">="
+
+        leftFirst, leftSecond = self.pairHalves(left)
+        rightFirst, rightSecond = self.pairHalves(right)
+
+        def compare(op: str, a: TypedValue, b: TypedValue) -> ir.Value:
+            result: TypedValue | None = self.binaryOperation(op, a, b, node)
+            if result is None:
+                raise CompileError()
+            return result.value
+
+        if operator in ["==", "!="]:
+            equal: ir.Value = self.builder.and_(compare("==", leftFirst, rightFirst), compare("==", leftSecond, rightSecond))
+            return TypedValue(equal if operator == "==" else self.builder.not_(equal), BO)
+
+        less: ir.Value = self.builder.or_(
+            compare("<", leftFirst, rightFirst),
+            self.builder.and_(compare("==", leftFirst, rightFirst), compare("<", leftSecond, rightSecond)),
+        )
+        return TypedValue(less if operator == "<" else self.builder.not_(less), BO)
 
     def stringOperation(self, operator: str, left: TypedValue, right: TypedValue, node: Node) -> TypedValue | None:
         leftValue: ir.Value | None = self.stringOperand(left)
@@ -1166,6 +1618,12 @@ class Compiler:
             return None
 
         ctype: CType = target.ctype
+        if ctype.kind == "vec" and method == "srt" and len(arguments) == 1:
+            try:
+                return self.sortWithComparator(target, arguments[0], node)
+            except CompileError:
+                return None
+
         handler = METHODS.get(ctype.kind, {}).get(method)
         if handler is None:
             if ctype.kind == "struct" and ctype.struct.fieldIndex(name) is not None:
@@ -1190,6 +1648,24 @@ class Compiler:
             return handler(self, target, node, *resolvedArguments)
         except CompileError:
             return None
+
+    def sortWithComparator(self, target: TypedValue, argument: Expression, node: Node) -> TypedValue:
+        # v.srt(before) sorts with a function 'f before(a: T, b: T) -> bo' that says whether a goes first
+        elem: CType = target.ctype.elem
+        usage: str = f"v.srt(name) needs the name of a function like 'f before(a: {elem}, b: {elem}) -> bo'"
+        if argument.type() != NodeType.IdentifierLiteral or argument.value not in self.functions:
+            self.error(usage, argument)
+            raise CompileError()
+
+        comparator: FunctionInfo = self.functions[argument.value]
+        parameterTypes: list[CType] = [ctype for _, ctype in comparator.parameters]
+        if parameterTypes != [elem, elem] or comparator.returnType != BO:
+            signature: str = ", ".join(str(ctype) for ctype in parameterTypes)
+            self.error(f"{usage}, but {comparator.name} is ({signature}) -> {comparator.returnType}", argument)
+            raise CompileError()
+
+        self.sortVec(target.value, elem, node, comparator)
+        return TypedValue(None, VO)
 
     def expect(self, value: TypedValue, ctype: CType, node: Node, context: str) -> ir.Value:
         # converts or raises, for the many builtins that take a fixed type
@@ -1226,6 +1702,17 @@ class Compiler:
     def mapKey(self, value: ir.Value, ctype: CType) -> ir.Value:
         # every map key travels to the runtime as 64 bits
         match ctype.kind:
+            case "pair":
+                # (first, second) packed into one number that sorts the same way
+                packed: list[ir.Value] = []
+                for index, half in enumerate([ctype.first, ctype.second]):
+                    part: ir.Value = self.builder.extract_value(value, index)
+                    if half.bits < 32:
+                        part = self.builder.zext(part, I32)
+                    if half.kind == "int" and half.signed:
+                        part = self.builder.xor(part, ir.Constant(I32, 1 << 31))
+                    packed.append(self.builder.zext(part, I64))
+                return self.builder.or_(self.builder.shl(packed[0], ir.Constant(I64, 32)), packed[1])
             case "int":
                 if ctype.bits == 64:
                     return value
@@ -1236,43 +1723,60 @@ class Compiler:
                 return self.builder.bitcast(value, I64)
         return self.builder.ptrtoint(value, I64)
 
+    def unpackMapKey(self, packed: ir.Value, ctype: CType) -> ir.Value:
+        halves: list[ir.Value] = []
+        for index, half in enumerate([ctype.first, ctype.second]):
+            part: ir.Value = self.builder.lshr(packed, ir.Constant(I64, 32)) if index == 0 else packed
+            part = self.builder.trunc(part, I32)
+            if half.kind == "int" and half.signed:
+                part = self.builder.xor(part, ir.Constant(I32, 1 << 31))
+            if half.bits < 32:
+                part = self.builder.trunc(part, half.irType)
+            halves.append(part)
+        return self.makePair(ctype, halves[0], halves[1])
+
     def mapSlot(self, mapValue: ir.Value, mapType: CType, keyValue: TypedValue, node: Node) -> ir.Value | None:
         key: ir.Value | None = self.convert(keyValue, mapType.key, node, "the map key")
         if key is None:
             return None
 
         inserted: ir.Value = self.allocate(I8, "inserted")
+        # counted, because a new key can move the map's other values (see builtinSwap)
+        self.mapSlotCount += 1
         slot: ir.Value = self.callRuntime("cpl_map_at", [mapValue, self.mapKey(key, mapType.key), inserted])
         pointer: ir.Value = self.builder.bitcast(slot, mapType.value.irType.as_pointer())
 
         # like C++, reading a missing key inserts the default value; containers and structs need a real object
-        if mapType.value.kind in ["vec", "map", "struct"]:
+        if mapType.value.isContainer:
             wasInserted: ir.Value = self.builder.icmp_unsigned("!=", self.builder.load(inserted), ir.Constant(I8, 0))
             with self.builder.if_then(wasInserted):
                 self.builder.store(self.defaultValue(mapType.value), pointer)
         return pointer
 
     def elementSize(self, ctype: CType) -> int:
-        match ctype.kind:
-            case "bool" | "char":
-                return 1
-            case "int":
-                return ctype.bits // 8
-        return 8
+        # bytes per element in a vector, as LLVM lays the type out on this machine
+        key: str = str(ctype.irType)
+        if key not in self.typeSizes:
+            self.typeSizes[key] = ctype.irType.get_abi_size(self.targetData, context=self.module.context)
+        return self.typeSizes[key]
 
     def newVec(self, elem: CType, length: ir.Value, elemTypeExpression: TypeExpression | None = None) -> ir.Value:
         vec: ir.Value = self.callRuntime("cpl_vec_new", [ir.Constant(I64, self.elementSize(elem)), length])
 
         # zeroed memory is a fine default for numbers and strings, but containers and structs need real objects
-        if elem.kind in ["vec", "map", "struct"]:
+        if elem.isContainer:
             self.fillVec(vec, elem, lambda: self.defaultValue(elem, elemTypeExpression))
         return vec
 
     def fillVec(self, vec: ir.Value, elem: CType, makeValue: callable) -> None:
+        self.countedLoop(self.vecLength(vec), lambda index: self.store(makeValue(), self.vecSlot(vec, elem, index)))
+
+    def countedLoop(self, count: ir.Value, body: callable) -> None:
+        # for (index = 0; index < count; index++) body(index), with an i64 index
         function: ir.Function = self.builder.function
-        conditionBlock: ir.Block = function.append_basic_block("fill_condition")
-        bodyBlock: ir.Block = function.append_basic_block("fill_body")
-        endBlock: ir.Block = function.append_basic_block("fill_end")
+        conditionBlock: ir.Block = function.append_basic_block("loop_condition")
+        bodyBlock: ir.Block = function.append_basic_block("loop_body")
+        endBlock: ir.Block = function.append_basic_block("loop_end")
 
         counter: ir.Value = self.allocate(I64, "i")
         self.builder.store(ir.Constant(I64, 0), counter)
@@ -1280,11 +1784,10 @@ class Compiler:
 
         self.builder.position_at_end(conditionBlock)
         index: ir.Value = self.builder.load(counter)
-        self.builder.cbranch(self.builder.icmp_signed("<", index, self.vecLength(vec)), bodyBlock, endBlock)
+        self.builder.cbranch(self.builder.icmp_signed("<", index, count), bodyBlock, endBlock)
 
         self.builder.position_at_end(bodyBlock)
-        value: ir.Value = makeValue()
-        self.store(value, self.vecSlot(vec, elem, index))
+        body(index)
         self.builder.store(self.builder.add(index, ir.Constant(I64, 1)), counter)
         self.builder.branch(conditionBlock)
 
@@ -1300,7 +1803,7 @@ class Compiler:
         # struct fields start out as nil (so linked lists and trees don't recurse forever), containers start empty
         typeExpressions: list[TypeExpression] = self.structFieldTypes.get(info.name, [])
         for index, (_, fieldType) in enumerate(info.fields):
-            if fieldType.kind in ["vec", "map"]:
+            if fieldType.isContainer and fieldType.kind != "struct":
                 typeExpression: TypeExpression | None = typeExpressions[index] if index < len(typeExpressions) else None
                 self.store(self.defaultValue(fieldType, typeExpression), self.structField(pointer, ctype, index))
         return pointer
@@ -1317,7 +1820,9 @@ class Compiler:
                         length = typeExpression.arguments[1]
                 return self.newVec(ctype.elem, ir.Constant(I64, length), elemTypeExpression)
             case "map":
-                return self.callRuntime("cpl_map_new", [ir.Constant(I32, ctype.key.sortKind)])
+                return self.callRuntime("cpl_map_new", [ir.Constant(I32, self.mapKeyKind(ctype.key))])
+            case "pq":
+                return self.callRuntime("cpl_vec_new", [ir.Constant(I64, self.elementSize(ctype.elem)), ir.Constant(I64, 0)])
             case "struct":
                 return self.allocateStruct(ctype)
         # numbers are 0, booleans false and strings empty (a nil string pointer)
@@ -1375,17 +1880,53 @@ class Compiler:
         return pointer, container.ctype.value
 
     def visitMemberExpression(self, node: MemberExpression) -> TypedValue | None:
-        address = self.memberAddress(node)
+        owner: TypedValue | None = self.visitExpression(node.leftNode)
+        if owner is None:
+            return None
+
+        if owner.ctype.kind == "pair":
+            index: int | None = self.pairFieldIndex(owner.ctype, node)
+            if index is None:
+                return None
+            half: CType = owner.ctype.first if index == 0 else owner.ctype.second
+            return TypedValue(self.builder.extract_value(owner.value, index), half)
+
+        address = self.structMemberAddress(owner, node)
         if address is None:
             return None
         pointer, ctype = address
         return TypedValue(self.load(pointer), ctype)
 
-    def memberAddress(self, node: MemberExpression) -> tuple[ir.Value, CType] | None:
-        owner: TypedValue | None = self.visitExpression(node.leftNode)
-        if owner is None:
-            return None
+    def pairFieldIndex(self, ctype: CType, node: MemberExpression) -> int | None:
+        index: int | None = PAIR_FIELDS.get(node.name)
+        if index is None:
+            self.error(f"a {ctype} has the fields f and s (or first and second), not '{node.name}'", node)
+        return index
 
+    def memberAddress(self, node: MemberExpression) -> tuple[ir.Value, CType] | None:
+        # the parts of a pair live inside its variable or element, so they need the owner's address
+        if node.leftNode.type() in [NodeType.IdentifierLiteral, NodeType.IndexExpression, NodeType.MemberExpression]:
+            ownerAddress = self.visitAddress(node.leftNode)
+            if ownerAddress is None:
+                return None
+            ownerPointer, ownerType = ownerAddress
+            if ownerType.kind == "pair":
+                index: int | None = self.pairFieldIndex(ownerType, node)
+                if index is None:
+                    return None
+                half: CType = ownerType.first if index == 0 else ownerType.second
+                return self.builder.gep(ownerPointer, [ir.Constant(I32, 0), ir.Constant(I32, index)], inbounds=True), half
+            owner: TypedValue = TypedValue(self.load(ownerPointer), ownerType)
+        else:
+            owner = self.visitExpression(node.leftNode)
+            if owner is None:
+                return None
+            if owner.ctype.kind == "pair":
+                self.error("can't change part of a temporary pair; store it in a variable first", node)
+                return None
+        return self.structMemberAddress(owner, node)
+
+    def structMemberAddress(self, owner: TypedValue, node: MemberExpression) -> tuple[ir.Value, CType] | None:
         if owner.ctype.kind != "struct":
             method: str = METHOD_ALIASES.get(node.name, node.name)
             if method in METHODS.get(owner.ctype.kind, {}):
@@ -1430,13 +1971,16 @@ class Compiler:
 
     # region conversions
     def visitCastExpression(self, node: CastExpression) -> TypedValue | None:
+        if node.targetType.name == "pr":
+            return self.constructPair(node)
+
         target: CType | None = self.resolveType(node.targetType)
         if target is None:
             return None
 
         if target.kind == "vec":
             return self.constructVec(target, node)
-        if target.kind == "map":
+        if target.kind in ["map", "pq"]:
             if node.arguments:
                 self.error(f"{target}() doesn't take arguments", node)
                 return None
@@ -1470,6 +2014,46 @@ class Compiler:
             return None
         return TypedValue(value, target)
 
+    def constructPair(self, node: CastExpression) -> TypedValue | None:
+        # pr(a, b) takes its types from a and b; pr<A, B>(a, b) converts them; pr<A, B>() is the default
+        target: CType | None = None
+        if node.targetType.arguments:
+            target = self.resolveType(node.targetType)
+            if target is None:
+                return None
+            if not node.arguments:
+                return TypedValue(ir.Constant(target.irType, None), target)
+
+        if len(node.arguments) != 2:
+            self.error(f"a pair is made from two values, as in pr(a, b), not {len(node.arguments)}", node)
+            return None
+
+        halves: list[TypedValue] = []
+        for argument in node.arguments:
+            resolved: TypedValue | None = self.visitExpression(argument)
+            if resolved is None:
+                return None
+            halves.append(resolved)
+
+        if target is None:
+            target = self.pairType(halves[0].ctype, halves[1].ctype, node)
+            if target is None:
+                return None
+
+        first: ir.Value | None = self.convert(halves[0], target.first, node.arguments[0], "the first half of the pair")
+        second: ir.Value | None = self.convert(halves[1], target.second, node.arguments[1], "the second half of the pair")
+        if first is None or second is None:
+            return None
+        return TypedValue(self.makePair(target, first, second), target)
+
+    def makePair(self, ctype: CType, first: ir.Value, second: ir.Value) -> ir.Value:
+        value: ir.Value = self.builder.insert_value(ir.Constant(ctype.irType, ir.Undefined), first, 0)
+        return self.builder.insert_value(value, second, 1)
+
+    def pairHalves(self, pair: TypedValue) -> tuple[TypedValue, TypedValue]:
+        return (TypedValue(self.builder.extract_value(pair.value, 0), pair.ctype.first),
+                TypedValue(self.builder.extract_value(pair.value, 1), pair.ctype.second))
+
     def constructVec(self, target: CType, node: CastExpression) -> TypedValue | None:
         # vec<T>() is empty, vec<T>(n) has n default elements, vec<T>(n, x) has n copies of x
         if node.targetType.name == "arr":
@@ -1495,7 +2079,7 @@ class Compiler:
         if len(node.arguments) == 1:
             return TypedValue(self.newVec(target.elem, length, node.targetType.arguments[0]), target)
 
-        if target.elem.kind in ["vec", "map", "struct"]:
+        if target.elem.isContainer:
             self.error(f"vec<{target.elem}>(n, x) would share one {target.elem} between all elements; use vec<{target.elem}>(n) instead", node)
             return None
         fill: TypedValue | None = self.visitExpression(node.arguments[1])
@@ -1542,6 +2126,16 @@ class Compiler:
 
         if sourceType.kind == "nil" and target.kind == "struct":
             return ir.Constant(target.irType, None)
+
+        if sourceType.kind == "pair" and target.kind == "pair":
+            # half by half, so pr(0, 1) can become a pr<ll, ll>
+            first, second = self.pairHalves(source)
+            where: str = f"{context}, " if context else ""
+            firstValue: ir.Value | None = self.convert(first, target.first, node, f"{where}first half", explicit)
+            secondValue: ir.Value | None = self.convert(second, target.second, node, f"{where}second half", explicit)
+            if firstValue is None or secondValue is None:
+                return None
+            return self.makePair(target, firstValue, secondValue)
 
         if sourceType.isInteger and target.isInteger:
             if sourceType.bits == target.bits:
@@ -1697,7 +2291,39 @@ def guardedBuiltin(function: callable) -> callable:
     return run
 
 
+def builtinSwap(compiler: Compiler, node: CallExpression) -> TypedValue | None:
+    # swap(a, b) exchanges two variables, elements or fields of the same type
+    if len(node.arguments) != 2:
+        compiler.error(f"swap() takes 2 arguments but got {len(node.arguments)}", node)
+        raise CompileError()
+    a, b = node.arguments
+
+    countBefore: int = compiler.mapSlotCount
+    first = compiler.visitAddress(a)
+    firstUsesMap: bool = compiler.mapSlotCount != countBefore
+    countBetween: int = compiler.mapSlotCount
+    second = compiler.visitAddress(b)
+    secondUsesMap: bool = compiler.mapSlotCount != countBetween
+    if first is None or second is None:
+        raise CompileError()
+    if first[1] != second[1]:
+        compiler.error(f"swap() needs two things of the same type, not {first[1]} and {second[1]}", node)
+        raise CompileError()
+
+    # finding b in a map may have added a key and moved a's value, so look a up again (it exists now,
+    # so this lookup can't move anything)
+    if firstUsesMap and secondUsesMap:
+        first = compiler.visitAddress(a)
+
+    firstValue: ir.Value = compiler.load(first[0])
+    secondValue: ir.Value = compiler.load(second[0])
+    compiler.store(secondValue, first[0])
+    compiler.store(firstValue, second[0])
+    return TypedValue(None, VO)
+
+
 BUILTINS: dict[str, callable] = {
+    "swap": guardedBuiltin(builtinSwap),
     "min": guardedBuiltin(builtinMinMax),
     "max": guardedBuiltin(builtinMinMax),
     "abs": guardedBuiltin(builtinAbs),
@@ -1761,12 +2387,189 @@ def vecClear(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
 
 
 def vecSort(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
-    kind: int | None = target.ctype.elem.sortKind
-    if kind is None:
-        compiler.error(f"can't sort a {target.ctype}; only numbers, characters, booleans and strings can be sorted", node)
+    elem: CType = target.ctype.elem
+    if elem.sortKind is not None:
+        compiler.callRuntime("cpl_vec_sort", [target.value, ir.Constant(I32, elem.sortKind)])
+    elif elem.isOrderable:
+        compiler.sortVec(target.value, elem, node)
+    else:
+        compiler.error(f"a {target.ctype} has no natural order; sort it with a function: v.srt(before)", node)
         raise CompileError()
-    compiler.callRuntime("cpl_vec_sort", [target.value, ir.Constant(I32, kind)])
     return TypedValue(None, VO)
+
+
+def binarySearch(compiler: Compiler, target: TypedValue, node: Node, value: TypedValue, upper: bool) -> TypedValue:
+    # lb: the first index whose element isn't less than x; ub: the first index whose element is greater
+    elem: CType = target.ctype.elem
+    if not elem.isOrderable:
+        compiler.error(f"can't binary search a {target.ctype}; its elements have no order", node)
+        raise CompileError()
+    needle: TypedValue = TypedValue(compiler.expect(value, elem, node, "the value to search for"), elem)
+    builder: ir.IRBuilder = compiler.builder
+
+    low: ir.Value = compiler.allocate(I64, "low")
+    high: ir.Value = compiler.allocate(I64, "high")
+    builder.store(ir.Constant(I64, 0), low)
+    builder.store(compiler.vecLength(target.value), high)
+
+    function: ir.Function = builder.function
+    conditionBlock: ir.Block = function.append_basic_block("search_condition")
+    bodyBlock: ir.Block = function.append_basic_block("search_body")
+    endBlock: ir.Block = function.append_basic_block("search_end")
+    builder.branch(conditionBlock)
+
+    builder.position_at_end(conditionBlock)
+    builder.cbranch(builder.icmp_signed("<", builder.load(low), builder.load(high)), bodyBlock, endBlock)
+
+    builder.position_at_end(bodyBlock)
+    lowValue: ir.Value = builder.load(low)
+    highValue: ir.Value = builder.load(high)
+    middle: ir.Value = builder.add(lowValue, builder.lshr(builder.sub(highValue, lowValue), ir.Constant(I64, 1)))
+    element: TypedValue = TypedValue(compiler.load(compiler.vecSlot(target.value, elem, middle)), elem)
+    if upper:
+        goRight: ir.Value = builder.not_(compiler.lessThan(needle, element, node))
+    else:
+        goRight = compiler.lessThan(element, needle, node)
+    afterMiddle: ir.Value = builder.add(middle, ir.Constant(I64, 1))
+    builder.store(builder.select(goRight, afterMiddle, lowValue), low)
+    builder.store(builder.select(goRight, highValue, middle), high)
+    builder.branch(conditionBlock)
+
+    builder.position_at_end(endBlock)
+    return TypedValue(builder.load(low), LL)
+
+
+def vecLowerBound(compiler: Compiler, target: TypedValue, node: Node, value: TypedValue) -> TypedValue:
+    return binarySearch(compiler, target, node, value, upper=False)
+
+
+def vecUpperBound(compiler: Compiler, target: TypedValue, node: Node, value: TypedValue) -> TypedValue:
+    return binarySearch(compiler, target, node, value, upper=True)
+
+
+# region priority queues
+# a pq is a vector kept in binary heap order; push and pop are generated per element type
+def heapFirst(compiler: Compiler, ctype: CType, a: TypedValue, b: TypedValue, node: Node) -> ir.Value:
+    # whether a belongs closer to the top than b
+    return compiler.lessThan(a, b, node) if ctype.minFirst else compiler.lessThan(b, a, node)
+
+
+def pqPushFunction(compiler: Compiler, ctype: CType, node: Node) -> ir.Function:
+    elem: CType = ctype.elem
+
+    def generate(function: ir.Function) -> None:
+        vec, value = function.args
+        builder: ir.IRBuilder = compiler.builder
+        item: TypedValue = TypedValue(value, elem)
+
+        # make room at the end, then move the hole up until the parent should stay above the new item
+        length: ir.Value = compiler.vecLength(vec)
+        capacity: ir.Value = compiler.load(compiler.vecField(vec, 1))
+        with builder.if_then(builder.icmp_unsigned("==", length, capacity), likely=False):
+            compiler.callRuntime("cpl_vec_grow", [vec])
+        compiler.store(builder.add(length, ir.Constant(I64, 1)), compiler.vecField(vec, 0))
+
+        hole: ir.Value = compiler.allocate(I64, "hole")
+        builder.store(length, hole)
+        conditionBlock: ir.Block = function.append_basic_block("up_condition")
+        compareBlock: ir.Block = function.append_basic_block("up_compare")
+        moveBlock: ir.Block = function.append_basic_block("up_move")
+        doneBlock: ir.Block = function.append_basic_block("up_done")
+        builder.branch(conditionBlock)
+
+        builder.position_at_end(conditionBlock)
+        builder.cbranch(builder.icmp_unsigned(">", builder.load(hole), ir.Constant(I64, 0)), compareBlock, doneBlock)
+
+        builder.position_at_end(compareBlock)
+        index: ir.Value = builder.load(hole)
+        parent: ir.Value = builder.lshr(builder.sub(index, ir.Constant(I64, 1)), ir.Constant(I64, 1))
+        parentValue: TypedValue = TypedValue(compiler.load(compiler.vecSlot(vec, elem, parent)), elem)
+        builder.cbranch(heapFirst(compiler, ctype, item, parentValue, node), moveBlock, doneBlock)
+
+        builder.position_at_end(moveBlock)
+        compiler.store(parentValue.value, compiler.vecSlot(vec, elem, index))
+        builder.store(parent, hole)
+        builder.branch(conditionBlock)
+
+        builder.position_at_end(doneBlock)
+        compiler.store(value, compiler.vecSlot(vec, elem, builder.load(hole)))
+        builder.ret_void()
+
+    return compiler.helperFunction(f"cpl.{ctype}.push", ir.FunctionType(VOID, [compiler.vecPointer, elem.irType]), generate)
+
+
+def pqPopFunction(compiler: Compiler, ctype: CType, node: Node) -> ir.Function:
+    elem: CType = ctype.elem
+
+    def generate(function: ir.Function) -> None:
+        (vec,) = function.args
+        builder: ir.IRBuilder = compiler.builder
+
+        length: ir.Value = compiler.vecLength(vec)
+        with builder.if_then(builder.icmp_unsigned("==", length, ir.Constant(I64, 0)), likely=False):
+            compiler.callRuntime("cpl_panic_empty", [])
+            builder.unreachable()
+
+        # take the last item out, then move the hole at the top down until the last item fits there
+        size: ir.Value = builder.sub(length, ir.Constant(I64, 1))
+        compiler.store(size, compiler.vecField(vec, 0))
+        last: TypedValue = TypedValue(compiler.load(compiler.vecSlot(vec, elem, size)), elem)
+
+        hole: ir.Value = compiler.allocate(I64, "hole")
+        builder.store(ir.Constant(I64, 0), hole)
+        conditionBlock: ir.Block = function.append_basic_block("down_condition")
+        pickBlock: ir.Block = function.append_basic_block("down_pick")
+        moveBlock: ir.Block = function.append_basic_block("down_move")
+        doneBlock: ir.Block = function.append_basic_block("down_done")
+        builder.branch(conditionBlock)
+
+        builder.position_at_end(conditionBlock)
+        index: ir.Value = builder.load(hole)
+        left: ir.Value = builder.add(builder.shl(index, ir.Constant(I64, 1)), ir.Constant(I64, 1))
+        builder.cbranch(builder.icmp_unsigned("<", left, size), pickBlock, doneBlock)
+
+        builder.position_at_end(pickBlock)
+        right: ir.Value = builder.add(left, ir.Constant(I64, 1))
+        leftValue: TypedValue = TypedValue(compiler.load(compiler.vecSlot(vec, elem, left)), elem)
+        # the right child only counts when it exists; read it from the left slot otherwise
+        hasRight: ir.Value = builder.icmp_unsigned("<", right, size)
+        rightValue: TypedValue = TypedValue(compiler.load(compiler.vecSlot(vec, elem, builder.select(hasRight, right, left))), elem)
+        takeRight: ir.Value = builder.and_(hasRight, heapFirst(compiler, ctype, rightValue, leftValue, node))
+        child: ir.Value = builder.select(takeRight, right, left)
+        childValue: ir.Value = builder.select(takeRight, rightValue.value, leftValue.value)
+        builder.cbranch(heapFirst(compiler, ctype, TypedValue(childValue, elem), last, node), moveBlock, doneBlock)
+
+        builder.position_at_end(moveBlock)
+        compiler.store(childValue, compiler.vecSlot(vec, elem, index))
+        builder.store(child, hole)
+        builder.branch(conditionBlock)
+
+        builder.position_at_end(doneBlock)
+        with builder.if_then(builder.icmp_unsigned("<", builder.load(hole), size)):
+            compiler.store(last.value, compiler.vecSlot(vec, elem, builder.load(hole)))
+        builder.ret_void()
+
+    return compiler.helperFunction(f"cpl.{ctype}.pop", ir.FunctionType(VOID, [compiler.vecPointer]), generate)
+
+
+def pqPush(compiler: Compiler, target: TypedValue, node: Node, value: TypedValue) -> TypedValue:
+    item: ir.Value = compiler.expect(value, target.ctype.elem, node, "ps()")
+    compiler.builder.call(pqPushFunction(compiler, target.ctype, node), [target.value, item])
+    return TypedValue(None, VO)
+
+
+def pqPop(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
+    compiler.builder.call(pqPopFunction(compiler, target.ctype, node), [target.value])
+    return TypedValue(None, VO)
+
+
+def pqTop(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
+    isEmpty: ir.Value = compiler.builder.icmp_unsigned("==", compiler.vecLength(target.value), ir.Constant(I64, 0))
+    with compiler.builder.if_then(isEmpty, likely=False):
+        compiler.callRuntime("cpl_panic_empty", [])
+        compiler.builder.unreachable()
+    return TypedValue(compiler.load(compiler.vecSlot(target.value, target.ctype.elem, ir.Constant(I64, 0))), target.ctype.elem)
+# endregion
 
 
 def vecReverse(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
@@ -1812,7 +2615,17 @@ def mapEmpty(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
 
 def mapKeys(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
     keyType: CType = target.ctype.key
-    keys: ir.Value = compiler.callRuntime("cpl_map_keys", [target.value, ir.Constant(I64, compiler.elementSize(keyType))])
+    if keyType.kind != "pair":
+        keys: ir.Value = compiler.callRuntime("cpl_map_keys", [target.value, ir.Constant(I64, compiler.elementSize(keyType))])
+        return TypedValue(keys, compiler.vecType(keyType))
+
+    # pair keys come back packed into 64 bits; unpack them into a vector of pairs
+    packed: ir.Value = compiler.callRuntime("cpl_map_keys", [target.value, ir.Constant(I64, 8)])
+    count: ir.Value = compiler.vecLength(packed)
+    keys = compiler.newVec(keyType, count)
+    compiler.countedLoop(count, lambda index: compiler.store(
+        compiler.unpackMapKey(compiler.load(compiler.vecSlot(packed, ULL, index)), keyType),
+        compiler.vecSlot(keys, keyType, index)))
     return TypedValue(keys, compiler.vecType(keyType))
 
 
@@ -1821,11 +2634,14 @@ def mapClear(compiler: Compiler, target: TypedValue, node: Node) -> TypedValue:
     return TypedValue(None, VO)
 
 
+PAIR_FIELDS: dict[str, int] = {"f": 0, "first": 0, "s": 1, "second": 1}
+
 METHODS: dict[str, dict[str, callable]] = {
     "vec": {
         "pb": vecPushBack, "pp": vecPopBack, "sz": vecSize, "emp": vecEmpty, "bk": vecBack,
-        "clr": vecClear, "srt": vecSort, "rev": vecReverse,
+        "clr": vecClear, "srt": vecSort, "rev": vecReverse, "lb": vecLowerBound, "ub": vecUpperBound,
     },
+    "pq": {"ps": pqPush, "pp": pqPop, "tp": pqTop, "sz": vecSize, "emp": vecEmpty, "clr": vecClear},
     "string": {"sz": stringSize, "emp": stringEmpty, "sub": stringSub},
     "map": {"has": mapHas, "del": mapDelete, "sz": mapSize, "emp": mapEmpty, "keys": mapKeys, "clr": mapClear},
 }

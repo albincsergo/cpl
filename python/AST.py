@@ -17,6 +17,7 @@ class NodeType(Enum):
     IfStatement = "IfStatement"
     WhileStatement = "WhileStatement"
     ForStatement = "ForStatement"
+    ForEachStatement = "ForEachStatement"
     BreakStatement = "BreakStatement"
     ContinueStatement = "ContinueStatement"
     InputStatement = "InputStatement"
@@ -157,6 +158,14 @@ class ForStatement(Statement):
         self.initializer = initializer
         self.condition = condition
         self.step = step
+        self.body = body
+
+
+class ForEachStatement(Statement):
+    # for (x in v) { ... }   for (i, x in v) { ... }   for (i in rng(n)) { ... }
+    def __init__(self, names: list[str] = None, iterable: Expression = None, body: BlockStatement = None) -> None:
+        self.names = names if names is not None else []
+        self.iterable = iterable
         self.body = body
 
 

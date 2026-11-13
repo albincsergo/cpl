@@ -1,0 +1,4 @@
+f make() -> pr<it, it> { r pr(1, 2). }
+f mn() {
+    make().f = 3.
+}

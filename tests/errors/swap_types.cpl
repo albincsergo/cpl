@@ -1,0 +1,5 @@
+f mn() {
+    _ a: it.
+    _ b: ll.
+    swap(a, b).
+}

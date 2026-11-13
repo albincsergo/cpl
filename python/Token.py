@@ -166,6 +166,7 @@ TYPE_KEYWORDS: list[str] = [
     "st", "string",
     "vo", "void",
     "vec", "arr", "map",
+    "pr", "pq", "minpq",
 ]
 
 
