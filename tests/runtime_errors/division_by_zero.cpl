@@ -1,0 +1,4 @@
+f mn() {
+    _ zero: it.
+    ou @@ 10 / zero.
+}

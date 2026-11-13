@@ -1,0 +1,32 @@
+// the long keyword forms and C++ style method names work too
+stc Pair { first: it. second: it. }
+
+func total(p: Pair) -> int {
+    ret p.first + p.second.
+}
+
+func mn() -> int {
+    shall x: int eq 40.
+    shall p: Pair = Pair(x, 2).
+    shall v: vec<long>.
+    v.push_back(3). v.push_back(1). v.push_back(2).
+    v.sort().
+    v.pop_back().
+    shall m: map<string, bool>.
+    m["yes"] = true.
+    shall line: string.
+    while (v.size() < 4) { v.push_back(v.back() + 1). }
+    if (m.contains("yes") && !m.count("no") && !v.empty()) {
+        ou @@ total(p) @@ ' ' @@ v.size() @@ ' ' @@ v.back() @@ el.
+    } else {
+        ou @@ "broken" @@ el.
+    }
+    m.erase("yes").
+    ou @@ m.size() @@ ' ' @@ "substring".substr(3, 3) @@ el.
+    for (shall i: int = 0. i < 3. ++i) {
+        if i == 1 { continue. }
+        if i == 2 { break. }
+        ou @@ i @@ el.
+    }
+    ret 0.
+}

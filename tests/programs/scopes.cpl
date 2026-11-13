@@ -1,0 +1,39 @@
+// blocks, loops and functions each get their own scope; inner names can shadow outer ones
+_ x: it = 1.
+
+f readGlobal() -> it {
+    r x.
+}
+
+f mn() -> it {
+    ou @@ x @@ ' '.
+    _ x: it = 2.
+    ou @@ x @@ ' ' @@ readGlobal() @@ ' '.
+    {
+        _ x: it = 3.
+        ou @@ x @@ ' '.
+        x = 30.
+        ou @@ x @@ ' '.
+    }
+    ou @@ x @@ ' '.
+    if true {
+        _ x: st = "four".
+        ou @@ x @@ ' '.
+    }
+    for (_ x: it = 5. x < 6. ++x) { ou @@ x @@ ' '. }
+    ou @@ x @@ el.
+
+    // declaring inside a loop gives a fresh value every time around
+    for (_ i: it = 0. i < 3. ++i) {
+        _ fresh: it.
+        _ list: vec<it>.
+        fresh += i.
+        list.pb(i).
+        ou @@ fresh @@ '/' @@ list.sz() @@ ' '.
+    }
+    ou @@ el.
+
+    _ a, b, c: ll = 7.
+    a += 1.
+    ou @@ a @@ b @@ c @@ el.
+}

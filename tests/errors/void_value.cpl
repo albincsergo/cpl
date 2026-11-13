@@ -1,0 +1,4 @@
+f nothing() { }
+f mn() {
+    _ x: it = nothing().
+}

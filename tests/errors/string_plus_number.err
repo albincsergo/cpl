@@ -1,0 +1,1 @@
+(line 2): operator + doesn't work on st and it; turn the number into a string first with st(x)

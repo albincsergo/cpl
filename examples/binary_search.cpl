@@ -1,0 +1,23 @@
+// answer "how many numbers are smaller than x?" queries with binary search over a sorted vector
+f lowerBound(v: vec<ll>, x: ll) -> it {
+    _ low: it = 0.
+    _ high: it = it(v.sz()).
+    while low < high {
+        _ middle: it = (low + high) / 2.
+        if v[middle] < x { low = middle + 1. } else { high = middle. }
+    }
+    r low.
+}
+
+f mn() {
+    _ n, q: it.
+    in @ n @ q.
+    _ v: vec<ll> = vec<ll>(n).
+    for (_ i: it = 0. i < n. ++i) { in @ v[i]. }
+    v.srt().
+    for (_ i: it = 0. i < q. ++i) {
+        _ x: ll.
+        in @ x.
+        ou @@ lowerBound(v, x) @@ el.
+    }
+}

@@ -1,0 +1,5 @@
+f mn() {
+    _ a: it = "text".
+    _ b: st = 5.
+    ou @@ c.
+}

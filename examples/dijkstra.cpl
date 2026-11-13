@@ -1,0 +1,73 @@
+// Dijkstra's shortest paths with a hand-written binary heap
+struct Edge { to: it. weight: ll. }
+struct Item { distance: ll. node: it. }
+
+_ heap: vec<Item>.
+
+f heapPush(item: Item) {
+    heap.pb(item).
+    _ i: it = it(heap.sz()) - 1.
+    while i > 0 {
+        _ parent: it = (i - 1) / 2.
+        if heap[parent].distance <= heap[i].distance { brk. }
+        _ swap: Item = heap[parent].
+        heap[parent] = heap[i].
+        heap[i] = swap.
+        i = parent.
+    }
+}
+
+f heapPop() -> Item {
+    _ top: Item = heap[0].
+    heap[0] = heap.bk().
+    heap.pp().
+    _ i: it = 0.
+    _ n: it = it(heap.sz()).
+    while true {
+        _ smallest: it = i.
+        _ left: it = 2 * i + 1.
+        _ right: it = 2 * i + 2.
+        if left < n && heap[left].distance < heap[smallest].distance { smallest = left. }
+        if right < n && heap[right].distance < heap[smallest].distance { smallest = right. }
+        if smallest == i { brk. }
+        _ swap: Item = heap[smallest].
+        heap[smallest] = heap[i].
+        heap[i] = swap.
+        i = smallest.
+    }
+    r top.
+}
+
+f mn() {
+    _ n, m: it.
+    in @ n @ m.
+    _ graph: vec<vec<Edge>> = vec<vec<Edge>>(n + 1).
+    for (_ i: it = 0. i < m. ++i) {
+        _ a, b: it.
+        _ w: ll.
+        in @ a @ b @ w.
+        graph[a].pb(Edge(b, w)).
+        graph[b].pb(Edge(a, w)).
+    }
+
+    _ infinity: ll = 1e18.
+    _ distance: vec<ll> = vec<ll>(n + 1, infinity).
+    distance[1] = 0.
+    heapPush(Item(0, 1)).
+    while !heap.emp() {
+        _ current: Item = heapPop().
+        if current.distance > distance[current.node] { cont. }
+        _ edges: vec<Edge> = graph[current.node].
+        for (_ k: it = 0. k < edges.sz(). ++k) {
+            _ next: ll = current.distance + edges[k].weight.
+            if next < distance[edges[k].to] {
+                distance[edges[k].to] = next.
+                heapPush(Item(next, edges[k].to)).
+            }
+        }
+    }
+
+    for (_ v: it = 1. v <= n. ++v) {
+        if distance[v] == infinity { ou @@ v @@ ": unreachable" @@ el. } else { ou @@ v @@ ": " @@ distance[v] @@ el. }
+    }
+}

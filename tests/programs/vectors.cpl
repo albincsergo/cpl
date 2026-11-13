@@ -1,0 +1,86 @@
+// vectors: growing, shrinking, sorting, nesting, and the fact that they are shared, not copied
+f fill(v: vec<it>, n: it) {
+    for (_ i: it = 0. i < n. ++i) { v.pb(i * i). }
+}
+
+f range(n: it) -> vec<ll> {
+    _ result: vec<ll>.
+    for (_ i: it = 0. i < n. ++i) { result.pb(i). }
+    r result.
+}
+
+f show(v: vec<it>) {
+    for (_ i: it = 0. i < v.sz(). ++i) {
+        if i > 0 { ou @@ ' '. }
+        ou @@ v[i].
+    }
+    ou @@ el.
+}
+
+f mn() -> it {
+    _ v: vec<it>.
+    ou @@ v.sz() @@ ' ' @@ v.emp() @@ el.
+    fill(v, 5).
+    show(v).
+    ou @@ v.sz() @@ ' ' @@ v.bk() @@ ' ' @@ v.emp() @@ el.
+    v.pp().
+    v.pp().
+    show(v).
+
+    // assigning a vector shares it, like Python lists
+    _ alias: vec<it> = v.
+    alias.pb(99).
+    show(v).
+
+    // sorting and reversing
+    _ w: vec<it>.
+    w.pb(5). w.pb(-3). w.pb(12). w.pb(0). w.pb(-3). w.pb(7).
+    w.srt().
+    show(w).
+    w.rev().
+    show(w).
+    w.clr().
+    ou @@ w.sz() @@ el.
+
+    // unsigned and floating point sorting
+    _ us: vec<ull>.
+    us.pb(18446744073709551615). us.pb(1). us.pb(9223372036854775808).
+    us.srt().
+    ou @@ us[0] @@ ' ' @@ us[1] @@ ' ' @@ us[2] @@ el.
+    _ ds: vec<du>.
+    ds.pb(2,5). ds.pb(-1,25). ds.pb(0,0). ds.pb(100).
+    ds.srt().
+    ou @@ ds[0] @@ ' ' @@ ds[1] @@ ' ' @@ ds[2] @@ ' ' @@ ds[3] @@ el.
+
+    // sized and filled vectors
+    _ zeros: vec<ll> = vec<ll>(4).
+    _ sevens: vec<it> = vec<it>(3, 7).
+    _ flags: vec<bo> = vec<bo>(2, true).
+    ou @@ zeros[3] @@ ' ' @@ sevens[2] @@ ' ' @@ flags[1] @@ ' ' @@ range(10).sz() @@ ' ' @@ range(10)[9] @@ el.
+
+    // arr<T, N> is a vec<T> that starts with N elements
+    _ squares: arr<it, 6>.
+    for (_ i: it = 0. i < squares.sz(). ++i) { squares[i] = i * i. }
+    squares.pb(36).
+    show(squares).
+
+    // vectors of vectors: an adjacency list
+    _ n: it = 4.
+    _ graph: vec<vec<it>> = vec<vec<it>>(n).
+    graph[0].pb(1). graph[0].pb(2). graph[1].pb(3). graph[2].pb(3).
+    for (_ u: it = 0. u < n. ++u) {
+        ou @@ u @@ ':'.
+        for (_ k: it = 0. k < graph[u].sz(). ++k) { ou @@ ' ' @@ graph[u][k]. }
+        ou @@ el.
+    }
+
+    // a 2D grid with arr
+    _ grid: arr<arr<ch, 3>, 2>.
+    grid[0][0] = '#'. grid[1][2] = '@'.
+    ou @@ grid.sz() @@ ' ' @@ grid[1].sz() @@ ' ' @@ grid[0][0] @@ grid[1][2] @@ el.
+
+    // compound assignment on elements
+    _ c: vec<it> = vec<it>(3, 1).
+    c[0] += 10. c[1] *= 5. c[2]--.
+    show(c).
+}

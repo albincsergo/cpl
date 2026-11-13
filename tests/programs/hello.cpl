@@ -1,0 +1,10 @@
+// the classic, plus every kind of value ou @@ can print
+f mn() -> it {
+    ou @@ "Hello, World!" @@ el.
+    ou @@ 42 @@ ' ' @@ -7 @@ ' ' @@ 2,5 @@ ' ' @@ true @@ ' ' @@ false @@ el.
+    ou @@ 'c' @@ "har" @@ el.
+    ou @@ "tab\tquote\" backslash\\ " @@ "newline:\n".
+    ou @@ 1000000,0 @@ ' ' @@ 0,1 @@ ' ' @@ 1e9 @@ ' ' @@ 3,14159265 @@ el.
+    ou @@ 1'000'000 @@ el.
+    r 0.
+}

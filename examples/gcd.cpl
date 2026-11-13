@@ -1,0 +1,22 @@
+// read n numbers, print their greatest common divisor
+f gcd(a: ll, b: ll) -> ll {
+    if b == 0 { r a. }
+    r gcd(b, a % b).
+}
+
+f mn() -> it {
+    _ n: it.
+    in @ n.
+    _ v: vec<ll>.
+    for (_ i: it = 0. i < n. ++i) {
+        _ x: ll.
+        in @ x.
+        v.pb(x).
+    }
+    _ g: ll = v[0].
+    for (_ i: it = 1. i < n. ++i) {
+        g = gcd(g, v[i]).
+    }
+    ou @@ g @@ el.
+    r 0.
+}

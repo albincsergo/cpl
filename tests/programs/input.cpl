@@ -1,0 +1,34 @@
+// reading every kind of value, then whole lines, then until the end of the input
+f mn() -> it {
+    _ n: it.
+    _ big: ll.
+    _ ratio: du.
+    _ word: st.
+    _ letter: ch.
+    _ flag: bo.
+    _ u: ull.
+    in @ n @ big @ ratio @ word @ letter @ flag @ u.
+    ou @@ n @@ '|' @@ big @@ '|' @@ ratio @@ '|' @@ word @@ '|' @@ letter @@ '|' @@ flag @@ '|' @@ u @@ el.
+
+    // reading straight into vector elements
+    _ v: vec<it> = vec<it>(n).
+    for (_ i: it = 0. i < n. ++i) { in @ v[i]. }
+    _ total: it = 0.
+    for (_ i: it = 0. i < n. ++i) { total += v[i]. }
+    ou @@ "sum " @@ total @@ el.
+
+    // the rest of the current line is empty, then come two full lines
+    gl().
+    _ first: st = gl().
+    _ second: st = gl().
+    ou @@ '[' @@ first @@ "] [" @@ second @@ ']' @@ el.
+
+    // read words until the input runs out
+    _ count: it = 0.
+    _ last: st.
+    while !eof() {
+        in @ last.
+        count++.
+    }
+    ou @@ count @@ " words, last: " @@ last @@ el.
+}

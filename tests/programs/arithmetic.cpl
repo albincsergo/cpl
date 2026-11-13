@@ -1,0 +1,55 @@
+// integer and floating point arithmetic, conversions and operator precedence
+f mn() -> it {
+    // division truncates toward zero and % keeps the sign of the left side, like C++
+    ou @@ 7 / 2 @@ ' ' @@ -7 / 2 @@ ' ' @@ 7 % 3 @@ ' ' @@ -7 % 3 @@ ' ' @@ 7 % -3 @@ el.
+    ou @@ 2 + 3 * 4 @@ ' ' @@ (2 + 3) * 4 @@ ' ' @@ 10 - 4 - 3 @@ ' ' @@ 100 / 10 / 5 @@ el.
+
+    // ^ is power and binds tighter than unary minus; ^^ is xor
+    ou @@ 2 ^ 10 @@ ' ' @@ -2 ^ 2 @@ ' ' @@ (-2) ^ 3 @@ ' ' @@ 2 ^ 3 ^ 2 @@ ' ' @@ (6 ^^ 3) @@ el.
+    ou @@ 3 ^ 40 @@ ' ' @@ ll(3) ^ 39 @@ ' ' @@ 2,0 ^ 0,5 @@ el.
+
+    // 32-bit it wraps around, ll has 64 bits
+    _ big: it = 2147483647.
+    big += 1.
+    ou @@ big @@ ' ' @@ 2147483647 + 1 @@ ' ' @@ 2147483648 @@ ' ' @@ ll(2147483647) + 1 @@ el.
+    _ x: ll = 1000000007.
+    ou @@ x * x @@ ' ' @@ x * x % 998244353 @@ el.
+
+    // unsigned
+    _ u: ui = 0.
+    u -= 1.
+    _ v: ull = 18446744073709551615.
+    ou @@ u @@ ' ' @@ v @@ ' ' @@ v + 1 @@ ' ' @@ ull(-1) / 2 @@ el.
+
+    // bit operations
+    ou @@ (12 & 10) @@ ' ' @@ (12 | 10) @@ ' ' @@ ~0 @@ ' ' @@ (1 << 10) @@ ' ' @@ (-16 >> 2) @@ ' ' @@ (ll(1) << 62) @@ el.
+    _ bits: it = 0.
+    bits |= 1 << 3.
+    bits ^^= 1.
+    bits <<= 2.
+    ou @@ bits @@ el.
+
+    // doubles and mixing them with integers
+    ou @@ 7 / 2,0 @@ ' ' @@ 1 / 3,0 @@ ' ' @@ 5,5 % 2 @@ ' ' @@ -(2,5) @@ el.
+    ou @@ it(3,99) @@ ' ' @@ it(-3,99) @@ ' ' @@ du(7) / 2 @@ ' ' @@ ll(1e18) @@ el.
+    ou @@ prec(3,14159, 2) @@ ' ' @@ prec(2, 3) @@ ' ' @@ prec(0,125, 2) @@ el.
+
+    // math builtins
+    ou @@ min(3, 5) @@ ' ' @@ max(3, 5) @@ ' ' @@ min(2,5, 1) @@ ' ' @@ abs(-12) @@ ' ' @@ abs(-1,5) @@ el.
+    ou @@ sqrt(16) @@ ' ' @@ floor(2,7) @@ ' ' @@ ceil(2,1) @@ ' ' @@ prec(log(exp(1)), 3) @@ el.
+
+    // characters do arithmetic as integers
+    ou @@ 'a' + 1 @@ ' ' @@ ch('a' + 1) @@ ' ' @@ 'z' - 'a' @@ ' ' @@ it('0') @@ el.
+
+    // compound assignment, ++ and --
+    _ n: it = 10.
+    n += 5. n -= 3. n *= 2. n /= 4. n %= 4. n ^= 3.
+    ou @@ n @@ el.
+    n++. n++. --n.
+    ou @@ n @@ el.
+
+    // comparisons between different types
+    ou @@ (1 < 2) @@ ' ' @@ (2,5 > 2) @@ ' ' @@ (ll(5) == 5) @@ ' ' @@ ('a' < 'b') @@ ' ' @@ (3 != 3) @@ el.
+    ou @@ bo(5) @@ ' ' @@ bo(0) @@ ' ' @@ it(true) @@ ' ' @@ du(false) @@ el.
+    r 0.
+}

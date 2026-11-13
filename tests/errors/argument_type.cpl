@@ -1,0 +1,2 @@
+f greet(name: st) { ou @@ name. }
+f mn() { greet(42). }

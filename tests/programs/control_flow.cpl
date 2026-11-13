@@ -1,0 +1,84 @@
+// if / else if / else, while, for in all its forms, brk, cont and short-circuit logic
+_ log: st.
+
+f note(s: st) -> bo {
+    log = log + s.
+    r true.
+}
+
+f classify(n: it) -> st {
+    if n < 0 {
+        r "negative".
+    } else if n == 0 {
+        r "zero".
+    } else if n % 2 == 0 {
+        r "even".
+    } els {
+        r "odd".
+    }
+}
+
+f mn() -> it {
+    ou @@ classify(-5) @@ ' ' @@ classify(0) @@ ' ' @@ classify(4) @@ ' ' @@ classify(7) @@ el.
+
+    // while with brk and cont
+    _ i: it = 0.
+    _ sum: it = 0.
+    wh i < 100 {
+        i++.
+        if i % 3 == 0 { cont. }
+        if i > 10 { brk. }
+        sum += i.
+    }
+    ou @@ "while: " @@ sum @@ ' ' @@ i @@ el.
+
+    // nested for loops, brk only leaves the inner one
+    _ pairs: it = 0.
+    for (_ a: it = 0. a < 5. ++a) {
+        for (_ b: it = 0. b < 5. ++b) {
+            if b > a { brk. }
+            pairs++.
+        }
+    }
+    ou @@ "pairs: " @@ pairs @@ el.
+
+    // cont in a for loop still runs the step
+    _ odds: st.
+    for (_ k: it = 0. k < 10. k++) {
+        if k % 2 == 0 { cont. }
+        odds = odds + st(k).
+    }
+    ou @@ "odds: " @@ odds @@ el.
+
+    // every part of a for header is optional
+    _ j: it = 0.
+    for (. j < 3. ) { j += 1. }
+    for (. . ) { j *= 2. if j > 50 { brk. } }
+    ou @@ "j: " @@ j @@ el.
+
+    // counting down
+    for (_ k: it = 3. k > 0. --k) { ou @@ k @@ ' '. }
+    ou @@ "liftoff" @@ el.
+
+    // && and || only evaluate the right side when needed
+    _ t: bo = false && note("a").
+    _ u: bo = true || note("b").
+    _ v: bo = true && note("c").
+    _ w: bo = false || note("d").
+    ou @@ t @@ ' ' @@ u @@ ' ' @@ v @@ ' ' @@ w @@ ' ' @@ log @@ el.
+    ou @@ (!true) @@ ' ' @@ (!(1 > 2)) @@ ' ' @@ (true & false) @@ ' ' @@ (true | false) @@ ' ' @@ (true ^^ true) @@ el.
+
+    // numbers work as conditions too
+    if 5 { ou @@ "5 is true" @@ el. }
+    if 0,0 { ou @@ "unreachable" @@ el. } else { ou @@ "0.0 is false" @@ el. }
+
+    // while true with a return inside
+    _ steps: it = 0.
+    _ collatz: ll = 27.
+    while true {
+        if collatz == 1 { brk. }
+        if collatz % 2 == 0 { collatz /= 2. } else { collatz = 3 * collatz + 1. }
+        steps++.
+    }
+    ou @@ "collatz(27): " @@ steps @@ el.
+}

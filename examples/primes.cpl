@@ -1,0 +1,18 @@
+// sieve of Eratosthenes: count the primes up to n and print the first and last few
+f mn() {
+    _ n: it.
+    in @ n.
+    _ composite: vec<bo> = vec<bo>(n + 1).
+    _ primes: vec<it>.
+    for (_ i: it = 2. i <= n. ++i) {
+        if composite[i] { cont. }
+        primes.pb(i).
+        for (_ j: ll = ll(i) * i. j <= n. j += i) { composite[j] = true. }
+    }
+
+    ou @@ primes.sz() @@ " primes up to " @@ n @@ el.
+    for (_ i: it = 0. i < 10. ++i) { ou @@ primes[i] @@ ' '. }
+    ou @@ "..." .
+    for (_ i: ll = primes.sz() - 3. i < primes.sz(). ++i) { ou @@ ' ' @@ primes[i]. }
+    ou @@ el.
+}

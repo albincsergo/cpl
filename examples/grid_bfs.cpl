@@ -1,0 +1,48 @@
+// shortest path through a maze with breadth-first search; '#' is a wall, S is the start, E the exit
+struct Cell { row: it. col: it. }
+
+f mn() -> it {
+    _ rows, cols: it.
+    in @ rows @ cols.
+    _ grid: vec<st>.
+    for (_ i: it = 0. i < rows. ++i) {
+        _ line: st.
+        in @ line.
+        grid.pb(line).
+    }
+
+    _ distance: vec<vec<it>> = vec<vec<it>>(rows).
+    _ queue: vec<Cell>.
+    for (_ row: it = 0. row < rows. ++row) {
+        for (_ col: it = 0. col < cols. ++col) {
+            distance[row].pb(-1).
+            if grid[row][col] == 'S' {
+                distance[row][col] = 0.
+                queue.pb(Cell(row, col)).
+            }
+        }
+    }
+
+    _ dr: vec<it>. dr.pb(1). dr.pb(-1). dr.pb(0). dr.pb(0).
+    _ dc: vec<it>. dc.pb(0). dc.pb(0). dc.pb(1). dc.pb(-1).
+
+    // the queue only grows, so a moving front index is enough
+    for (_ front: it = 0. front < queue.sz(). ++front) {
+        _ cell: Cell = queue[front].
+        if grid[cell.row][cell.col] == 'E' {
+            ou @@ "shortest path: " @@ distance[cell.row][cell.col] @@ " steps" @@ el.
+            r 0.
+        }
+        for (_ d: it = 0. d < 4. ++d) {
+            _ row: it = cell.row + dr[d].
+            _ col: it = cell.col + dc[d].
+            if row < 0 || row >= rows || col < 0 || col >= cols { cont. }
+            if grid[row][col] == '#' || distance[row][col] != -1 { cont. }
+            distance[row][col] = distance[cell.row][cell.col] + 1.
+            queue.pb(Cell(row, col)).
+        }
+    }
+
+    ou @@ "no way out" @@ el.
+    r 1.
+}

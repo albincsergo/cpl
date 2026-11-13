@@ -1,0 +1,2 @@
+f add(a: it, b: it) -> it { r a + b. }
+f mn() { ou @@ add(1). }

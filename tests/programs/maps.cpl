@@ -1,0 +1,59 @@
+// hash maps: like C++, reading a missing key inserts its default; keys() comes back sorted
+struct Stats { total: ll. count: it. }
+
+f mn() -> it {
+    _ count: map<st, it>.
+    _ text: vec<st>.
+    text.pb("b"). text.pb("a"). text.pb("c"). text.pb("a"). text.pb("b"). text.pb("a").
+    for (_ i: it = 0. i < text.sz(). ++i) { count[text[i]]++. }
+    _ keys: vec<st> = count.keys().
+    for (_ i: it = 0. i < keys.sz(). ++i) { ou @@ keys[i] @@ '=' @@ count[keys[i]] @@ ' '. }
+    ou @@ count.sz() @@ el.
+
+    ou @@ count.has("a") @@ ' ' @@ count.has("z") @@ ' ' @@ count.sz() @@ el.
+    ou @@ count["z"] @@ ' ' @@ count.has("z") @@ ' ' @@ count.sz() @@ el.
+    count.del("z").
+    count.del("never there").
+    ou @@ count.has("z") @@ ' ' @@ count.sz() @@ el.
+
+    // integer keys, including negative ones, sort numerically
+    _ squares: map<ll, ll>.
+    for (_ i: it = -3. i <= 3. ++i) { squares[i] = i * i. }
+    _ order: vec<ll> = squares.keys().
+    for (_ i: it = 0. i < order.sz(). ++i) { ou @@ order[i] @@ ':' @@ squares[order[i]] @@ ' '. }
+    ou @@ el.
+
+    // lots of keys, to make the table grow and handle deletions
+    _ big: map<it, it>.
+    for (_ i: it = 0. i < 100000. ++i) { big[i * 7] = i. }
+    for (_ i: it = 0. i < 100000. i += 2) { big.del(i * 7). }
+    _ sum: ll = 0.
+    _ bigKeys: vec<it> = big.keys().
+    for (_ i: it = 0. i < bigKeys.sz(). ++i) { sum += big[bigKeys[i]]. }
+    ou @@ big.sz() @@ ' ' @@ sum @@ ' ' @@ big.has(7) @@ ' ' @@ big.has(14) @@ el.
+
+    // maps of vectors and of structs create the value on first use
+    _ groups: map<ch, vec<st>>.
+    groups['f'].pb("fig"). groups['a'].pb("apple"). groups['f'].pb("fennel").
+    ou @@ groups['f'].sz() @@ ' ' @@ groups['a'][0] @@ ' ' @@ groups['q'].sz() @@ ' ' @@ groups.sz() @@ el.
+
+    _ stats: map<st, Stats>.
+    stats["x"].total += 10. stats["x"].count++. stats["x"].total += 5. stats["x"].count++.
+    ou @@ stats["x"].total @@ '/' @@ stats["x"].count @@ el.
+
+    // other key types
+    _ byDouble: map<du, st>.
+    byDouble[0,5] = "half". byDouble[-0,0] = "zero". byDouble[0,0] = "still zero".
+    ou @@ byDouble.sz() @@ ' ' @@ byDouble[0] @@ ' ' @@ byDouble[0,5] @@ el.
+    _ seen: map<bo, it>.
+    seen[true] = 1. seen[false] = 2. seen[1 > 0] += 10.
+    ou @@ seen[true] @@ ' ' @@ seen[false] @@ el.
+
+    // maps are shared, not copied
+    _ alias: map<st, it> = count.
+    alias["new"] = 5.
+    ou @@ count["new"] @@ el.
+
+    count.clr().
+    ou @@ count.sz() @@ ' ' @@ count.emp() @@ el.
+}

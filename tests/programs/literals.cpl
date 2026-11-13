@@ -1,0 +1,12 @@
+// whole number double literals can initialize integers, the way competitive programmers write limits
+_ infinity: ll = 1e18.
+_ mod: it = 1e9 + 7.
+
+f mn() {
+    _ small: it = -1e3.
+    _ huge: ull = 1e19.
+    _ two: ch = 2,0.
+    ou @@ infinity @@ ' ' @@ small @@ ' ' @@ huge @@ ' ' @@ it(two) @@ el.
+    // arithmetic on literals is worked out while compiling, so 1e9 + 7 is still a whole number literal
+    ou @@ mod @@ el.
+}

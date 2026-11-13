@@ -1,0 +1,16 @@
+// 0/1 knapsack with dynamic programming: best total value within a weight limit
+f mn() {
+    _ n, capacity: it.
+    in @ n @ capacity.
+    _ weight: vec<it> = vec<it>(n).
+    _ value: vec<ll> = vec<ll>(n).
+    for (_ i: it = 0. i < n. ++i) { in @ weight[i] @ value[i]. }
+
+    _ best: vec<ll> = vec<ll>(capacity + 1).
+    for (_ i: it = 0. i < n. ++i) {
+        for (_ w: it = capacity. w >= weight[i]. --w) {
+            best[w] = max(best[w], best[w - weight[i]] + value[i]).
+        }
+    }
+    ou @@ best[capacity] @@ el.
+}

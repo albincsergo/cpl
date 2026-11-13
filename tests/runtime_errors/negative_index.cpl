@@ -1,0 +1,5 @@
+f mn() {
+    _ v: vec<it> = vec<it>(3).
+    _ i: it = -1.
+    ou @@ v[i].
+}

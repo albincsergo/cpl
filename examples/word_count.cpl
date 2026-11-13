@@ -1,0 +1,23 @@
+// count how often each word appears until the end of the input, most frequent first
+f mn() {
+    _ count: map<st, it>.
+    _ total: it = 0.
+    while !eof() {
+        _ word: st.
+        in @ word.
+        count[word]++.
+        total++.
+    }
+
+    // bucket the words by how often they appear; keys() is sorted, so ties come out alphabetically
+    _ words: vec<st> = count.keys().
+    _ best: it = 0.
+    for (_ i: it = 0. i < words.sz(). ++i) { best = max(best, count[words[i]]). }
+
+    ou @@ total @@ " words, " @@ words.sz() @@ " different" @@ el.
+    for (_ times: it = best. times >= 1. --times) {
+        for (_ i: it = 0. i < words.sz(). ++i) {
+            if count[words[i]] == times { ou @@ times @@ ' ' @@ words[i] @@ el. }
+        }
+    }
+}

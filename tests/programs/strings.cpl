@@ -1,0 +1,51 @@
+// strings are immutable values: + builds new ones, comparisons look at the contents
+f reversed(s: st) -> st {
+    _ result: st.
+    for (_ i: ll = s.sz() - 1. i >= 0. --i) { result = result + s[i]. }
+    r result.
+}
+
+f isPalindrome(s: st) -> bo {
+    r s == reversed(s).
+}
+
+f mn() -> it {
+    _ s: st = "competitive".
+    ou @@ s @@ ' ' @@ s.sz() @@ ' ' @@ s[0] @@ s[s.sz() - 1] @@ ' ' @@ s.sub(3, 4) @@ ' ' @@ s.sub(7, 100) @@ el.
+
+    _ t: st = s + " " + "programming".
+    t = t + '!'.
+    t += "!".
+    ou @@ t @@ el.
+
+    // comparison is lexicographic
+    ou @@ ("abc" < "abd") @@ ' ' @@ ("abc" < "ab") @@ ' ' @@ ("x" == "x") @@ ' ' @@ ("" < "a") @@ ' ' @@ ("B" < "a") @@ el.
+
+    // an unset string is empty
+    _ empty: st.
+    ou @@ empty.sz() @@ ' ' @@ empty.emp() @@ ' ' @@ (empty == "") @@ ' ' @@ s.emp() @@ el.
+
+    ou @@ reversed("stressed") @@ ' ' @@ isPalindrome("racecar") @@ ' ' @@ isPalindrome("cpl") @@ el.
+
+    // conversions both ways
+    _ n: it = it("123") + 1.
+    _ d: du = du("2.5") * 2.
+    ou @@ n @@ ' ' @@ d @@ ' ' @@ st(-42) + st(2,5) + st('x') + st(true) + st(ull(18446744073709551615)) @@ el.
+    ou @@ ll("-9000000000000") @@ ' ' @@ st(1e20) @@ el.
+
+    // counting characters
+    _ counts: vec<it> = vec<it>(26).
+    _ text: st = "mississippi".
+    for (_ i: it = 0. i < text.sz(). ++i) { counts[text[i] - 'a']++. }
+    for (_ c: it = 0. c < 26. ++c) {
+        if counts[c] > 0 { ou @@ ch('a' + c) @@ counts[c]. }
+    }
+    ou @@ el.
+
+    // sorting strings
+    _ words: vec<st>.
+    words.pb("pear"). words.pb("apple"). words.pb("fig"). words.pb("banana"). words.pb("apple").
+    words.srt().
+    for (_ i: it = 0. i < words.sz(). ++i) { ou @@ words[i] @@ ' '. }
+    ou @@ el.
+}

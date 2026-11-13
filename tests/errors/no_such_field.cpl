@@ -1,0 +1,5 @@
+struct P { x: it. }
+f mn() {
+    _ p: P.
+    ou @@ p.z.
+}

@@ -1,0 +1,3 @@
+f mn() {
+    _ g: vec<vec<it>> = vec<vec<it>>(3, vec<it>()).
+}

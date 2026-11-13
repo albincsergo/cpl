@@ -1,0 +1,61 @@
+// recursion, mutual recursion, functions used before they are defined, vo functions and globals
+_ counter: ll = 0.
+_ greeting: st = "hi".
+
+f isEven(n: it) -> bo {
+    if n == 0 { r true. }
+    r isOdd(n - 1).
+}
+
+f isOdd(n: it) -> bo {
+    if n == 0 { r false. }
+    r isEven(n - 1).
+}
+
+f factorial(n: ll) -> ll {
+    if n <= 1 { r 1. }
+    r n * factorial(n - 1).
+}
+
+f ackermann(m: ll, n: ll) -> ll {
+    if m == 0 { r n + 1. }
+    if n == 0 { r ackermann(m - 1, 1). }
+    r ackermann(m - 1, ackermann(m, n - 1)).
+}
+
+f bump(by: ll) {
+    counter += by.
+    if counter > 100 { r. }
+    counter += 1.
+}
+
+f modpow(base: ll, exponent: ll, mod: ll) -> ll {
+    _ result: ll = 1.
+    base %= mod.
+    while exponent > 0 {
+        if exponent & 1 { result = result * base % mod. }
+        base = base * base % mod.
+        exponent >>= 1.
+    }
+    r result.
+}
+
+// parameters are copies for numbers; changing them doesn't affect the caller
+f twice(x: it) -> it {
+    x *= 2.
+    r x.
+}
+
+f mn() -> it {
+    ou @@ isEven(10) @@ ' ' @@ isOdd(7) @@ ' ' @@ isEven(3) @@ el.
+    ou @@ factorial(20) @@ el.
+    ou @@ ackermann(2, 3) @@ ' ' @@ ackermann(3, 3) @@ el.
+    bump(5).
+    bump(200).
+    ou @@ counter @@ ' ' @@ greeting @@ el.
+    ou @@ modpow(2, 1000000, 1000000007) @@ el.
+    _ x: it = 21.
+    ou @@ twice(x) @@ ' ' @@ x @@ el.
+    // ints convert to ll arguments automatically
+    ou @@ factorial(x - 16) @@ el.
+}

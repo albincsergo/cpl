@@ -1,0 +1,72 @@
+// structs are references, like objects in Java or Python; struct fields start as nil
+struct Point { x: it. y: it. }
+
+struct Node {
+    value: it.
+    next: Node.
+}
+
+struct Team {
+    name: st.
+    members: vec<st>.
+    scores: map<st, it>.
+    leader: Point.
+}
+
+f moveRight(p: Point, by: it) {
+    p.x += by.
+}
+
+f push(head: Node, value: it) -> Node {
+    r Node(value, head).
+}
+
+f length(head: Node) -> it {
+    _ count: it = 0.
+    while head != nil {
+        count++.
+        head = head.next.
+    }
+    r count.
+}
+
+f mn() -> it {
+    _ origin: Point.
+    _ p: Point = Point(3, 4).
+    ou @@ origin.x @@ ',' @@ origin.y @@ ' ' @@ p.x @@ ',' @@ p.y @@ el.
+
+    moveRight(p, 10).
+    ou @@ p.x @@ el.
+
+    _ same: Point = p.
+    same.y = 100.
+    ou @@ p.y @@ ' ' @@ (same == p) @@ ' ' @@ (Point(1, 1) == Point(1, 1)) @@ el.
+
+    // a linked list built from the front
+    _ list: Node = nil.
+    for (_ i: it = 1. i <= 5. ++i) { list = push(list, i * 10). }
+    ou @@ length(list) @@ ':'.
+    _ walker: Node = list.
+    while walker != nil {
+        ou @@ ' ' @@ walker.value.
+        walker = walker.next.
+    }
+    ou @@ el.
+
+    // containers inside structs start empty, struct fields start as nil
+    _ team: Team.
+    team.name = "cpl".
+    team.members.pb("alice"). team.members.pb("bob").
+    team.scores["alice"] = 7.
+    ou @@ team.name @@ ' ' @@ team.members.sz() @@ ' ' @@ team.scores["alice"] @@ ' ' @@ (team.leader == nil) @@ el.
+    team.leader = Point(1, 2).
+    ou @@ team.leader.x + team.leader.y @@ el.
+
+    // vectors of structs
+    _ points: vec<Point> = vec<Point>(3).
+    for (_ i: it = 0. i < points.sz(). ++i) { points[i].x = i. points[i].y = i * i. }
+    points.pb(Point(9, 81)).
+    _ total: it = 0.
+    for (_ i: it = 0. i < points.sz(). ++i) { total += points[i].y. }
+    ou @@ points.sz() @@ ' ' @@ total @@ el.
+}

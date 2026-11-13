@@ -1,0 +1,5 @@
+struct Node { value: it. next: Node. }
+f mn() {
+    _ n: Node.
+    ou @@ n.next.value.
+}
